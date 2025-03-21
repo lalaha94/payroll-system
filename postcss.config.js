@@ -1,1 +1,7 @@
-"module.exports = { plugins: { tailwindcss: {}, autoprefixer: {} } };" 
+export default {
+  plugins: {
+    "postcss-import": {},
+    "postcss-nested": {},
+    autoprefixer: {},
+  },
+};

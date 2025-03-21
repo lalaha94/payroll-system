@@ -1,0 +1,81 @@
+import React, { useEffect, useState } from "react";
+import { supabase } from "./supabaseClient";
+
+function SalesDataSort() {
+  const [sales, setSales] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // 1. Hent salgsdata fra Supabase ved første innlasting
+  useEffect(() => {
+    async function fetchSalesData() {
+      setLoading(true);
+      const { data, error } = await supabase.from("sales_data").select("*");
+      if (error) {
+        console.error("Feil ved henting av salgsdata:", error);
+      } else {
+        setSales(data);
+      }
+      setLoading(false);
+    }
+    fetchSalesData();
+  }, []);
+
+  // 2. Funksjon for å sortere data i state
+  const sortData = (key, order = "asc") => {
+    // Lager en kopi av sales for ikke å mutere eksisterende state direkte
+    const sorted = [...sales].sort((a, b) => {
+      if (a[key] < b[key]) return order === "asc" ? -1 : 1;
+      if (a[key] > b[key]) return order === "asc" ? 1 : -1;
+      return 0;
+    });
+    setSales(sorted);
+  };
+
+  if (loading) {
+    return <div>Laster salgsdata...</div>;
+  }
+
+  return (
+    <div style={{ margin: "2rem" }}>
+      <h2>Salgsdata med sortering</h2>
+      {/* 3. Knapper for å sortere på ulike felter */}
+      <div style={{ marginBottom: "1rem" }}>
+        <button onClick={() => sortData("agent_name", "asc")}>
+          Sorter Agent Name (A-Å)
+        </button>
+        <button onClick={() => sortData("agent_name", "desc")} style={{ marginLeft: 8 }}>
+          Sorter Agent Name (Å-A)
+        </button>
+        <button onClick={() => sortData("net_premium_sales", "asc")} style={{ marginLeft: 16 }}>
+          Sorter Net Premium Sales (stigende)
+        </button>
+        <button onClick={() => sortData("net_premium_sales", "desc")} style={{ marginLeft: 8 }}>
+          Sorter Net Premium Sales (synkende)
+        </button>
+      </div>
+
+      {/* 4. Enkel tabell for å vise data */}
+      <table border="1" cellPadding="6" style={{ borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Agent Name</th>
+            <th>Net Premium Sales</th>
+            {/* Legg til flere kolonner ved behov */}
+          </tr>
+        </thead>
+        <tbody>
+          {sales.map((sale) => (
+            <tr key={sale.id}>
+              <td>{sale.id}</td>
+              <td>{sale.agent_name}</td>
+              <td>{sale.net_premium_sales}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default SalesDataSort;
