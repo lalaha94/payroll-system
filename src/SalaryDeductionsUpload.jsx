@@ -47,6 +47,7 @@ import {
   InsertDriveFile,
 } from "@mui/icons-material";
 import { useTheme } from "@mui/material/styles";
+import NavigationMenu from "./components/NavigationMenu";
 
 function SalaryDeductionsUpload() {
   const theme = useTheme();
@@ -413,110 +414,7 @@ function SalaryDeductionsUpload() {
 
   return (
     <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
-      {/* Navigation Buttons */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 4 }}>
-        <Stack direction="row" spacing={1.5}>
-          <Button 
-            component={Link} 
-            to="/employees" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Se ansatte
-          </Button>
-          <Button 
-            component={Link} 
-            to="/salary-models" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Administrer lønnstrinn
-          </Button>
-          <Button 
-            component={Link} 
-            to="/sales-data" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Salgsdata
-          </Button>
-          <Button 
-            component={Link} 
-            to="/sales-dashboard" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Dashboard
-          </Button>
-          <Button 
-            component={Link} 
-            to="/salary-deductions" 
-            variant="contained"
-            size="small"
-            disableElevation
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              backgroundColor: theme.palette.primary.main,
-              '&:hover': {
-                backgroundColor: theme.palette.primary.dark,
-              }
-            }}
-          >
-            Lønnstrekk
-          </Button>
-        </Stack>
-      </Box>
+      <NavigationMenu />
 
       <Grid container spacing={3}>
         {/* Excel Upload Section */}

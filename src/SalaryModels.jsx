@@ -40,6 +40,7 @@ import {
 } from "@mui/icons-material";
 import { Link } from "react-router-dom";
 import { useTheme } from "@mui/material/styles";
+import NavigationMenu from "./components/NavigationMenu";
 
 function SalaryModels() {
   const theme = useTheme();
@@ -181,110 +182,8 @@ function SalaryModels() {
 
   return (
     <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
-      {/* Navigation Buttons */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 4 }}>
-        <Stack direction="row" spacing={1.5}>
-          <Button 
-            component={Link} 
-            to="/employees" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Se ansatte
-          </Button>
-          <Button 
-            component={Link} 
-            to="/salary-models" 
-            variant="contained"
-            size="small"
-            disableElevation
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              backgroundColor: theme.palette.primary.main,
-              '&:hover': {
-                backgroundColor: theme.palette.primary.dark,
-              }
-            }}
-          >
-            Administrer lønnstrinn
-          </Button>
-          <Button 
-            component={Link} 
-            to="/salary-deductions" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Lønnstrekk
-          </Button>
-          <Button 
-            component={Link} 
-            to="/sales-data" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Salgsdata
-          </Button>
-          <Button 
-            component={Link} 
-            to="/sales-dashboard" 
-            variant="outlined"
-            size="small"
-            sx={{ 
-              borderRadius: '20px',
-              textTransform: 'none',
-              px: 2,
-              fontWeight: 500,
-              borderColor: 'rgba(0, 0, 0, 0.12)',
-              color: 'text.primary',
-              '&:hover': {
-                backgroundColor: 'rgba(0, 0, 0, 0.04)',
-                borderColor: 'rgba(0, 0, 0, 0.23)',
-              }
-            }}
-          >
-            Dashboard
-          </Button>
-        </Stack>
-      </Box>
+      {/* Replace the navigation buttons with the NavigationMenu component */}
+      <NavigationMenu />
 
       <Grid container spacing={3}>
         <Grid item xs={12}>
