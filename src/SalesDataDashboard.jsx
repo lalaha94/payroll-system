@@ -81,19 +81,91 @@ async function fetchSalaryModels() {
 
 /**
  * Beregner provisjonen basert på provisjonsgrunnlag, lønnstrinn og forsikringstype.
+ * Tar hensyn til bonusprovisjon hvis totalt salg er over terskelverdi.
  */
-function calculateCommission(provisjonsgrunnlag, salaryModels, insuranceType) {
-  const model =
-    insuranceType === "Liv"
-      ? salaryModels.find((m) => m.commission_liv != null)
-      : salaryModels.find((m) => m.commission_skade != null);
-  if (!model || !provisjonsgrunnlag) return 0;
-  if (insuranceType === "Liv") {
-    return (provisjonsgrunnlag * parseFloat(model.commission_liv)) / 100;
-  } else if (insuranceType === "Skadeforsikring") {
-    return (provisjonsgrunnlag * parseFloat(model.commission_skade)) / 100;
+function calculateCommission(data, salaryModels) {
+  // Find the correct salary model with better error handling
+  const model = salaryModels.find(m => parseInt(m.id) === parseInt(data.salary_level));
+  
+  // Debug logging
+  console.log("Commission calculation:", {
+    agent: data.agent_name,
+    agentId: data.agent_id,
+    monthKey: data.monthKey,
+    modelId: data.salary_level,
+    foundModel: model ? `${model.name} (id: ${model.id})` : "Not found",
+    livPremium: data.livPremium,
+    skadePremium: data.skadePremium,
+    availableModels: salaryModels.map(m => `${m.name} (id: ${m.id})`)
+  });
+  
+  // Use the found model or fallback to the first model
+  const activeModel = model || salaryModels[0] || {
+    commission_liv: 0,
+    commission_skade: 0,
+    bonus_enabled: false
+  };
+  
+  let livRate = parseFloat(activeModel.commission_liv) || 0;
+  let skadeRate = parseFloat(activeModel.commission_skade) || 0;
+  
+  // Calculate base commissions
+  let livCommission = data.livPremium * livRate / 100;
+  let skadeCommission = data.skadePremium * skadeRate / 100;
+  
+  // Calculate total premium for bonus threshold check
+  const totalPremium = data.livPremium + data.skadePremium;
+  
+  // Additional logging for commission rates
+  console.log("Commission rates:", {
+    livRate: livRate,
+    skadeRate: skadeRate,
+    livPremium: data.livPremium,
+    skadePremium: data.skadePremium,
+    baseLivCommission: livCommission,
+    baseSkadeCommission: skadeCommission
+  });
+  
+  // Check if bonus is applicable
+  if (activeModel.bonus_enabled && 
+      activeModel.bonus_threshold && 
+      totalPremium >= parseFloat(activeModel.bonus_threshold)) {
+    
+    // Add bonus commission
+    const bonusLivRate = parseFloat(activeModel.bonus_percentage_liv) || 0;
+    const bonusSkadeRate = parseFloat(activeModel.bonus_percentage_skade) || 0;
+    
+    const bonusLivCommission = data.livPremium * bonusLivRate / 100;
+    const bonusSkadeCommission = data.skadePremium * bonusSkadeRate / 100;
+    
+    livCommission += bonusLivCommission;
+    skadeCommission += bonusSkadeCommission;
+    
+    // Log bonus calculation
+    console.log("Bonus applied:", {
+      bonusLivRate,
+      bonusSkadeRate,
+      bonusLivCommission,
+      bonusSkadeCommission,
+      threshold: activeModel.bonus_threshold,
+      totalPremium
+    });
   }
-  return 0;
+  
+  const totalCommission = livCommission + skadeCommission;
+  
+  // Final log of calculated commissions
+  console.log("Final commission:", {
+    livCommission,
+    skadeCommission,
+    totalCommission
+  });
+  
+  return {
+    livCommission,
+    skadeCommission,
+    totalCommission
+  };
 }
 
 /**
@@ -116,7 +188,7 @@ function aggregateSalesByAgent(sales) {
   const uniqueMonths = new Set();
 
   for (const sale of sales) {
-    const { agent_id, agent_name, policy_sale_date, provisjonsgruppe } = sale;
+    const { agent_id, agent_name, policy_sale_date, provisjonsgruppe, salary_level } = sale;
     const monthKey = getMonthKey(policy_sale_date);
     uniqueMonths.add(monthKey);
 
@@ -152,9 +224,10 @@ function aggregateSalesByAgent(sales) {
       }
     }
 
-    // Create or update agent record
+    // Create or update agent record with explicit salary_level mapping
     const agentKey = `${agent_id}-${monthKey}`;
     if (!byAgent[agentKey]) {
+      // Find the employee to get their salary_level
       byAgent[agentKey] = {
         id: agentKey,
         agent_id,
@@ -166,7 +239,7 @@ function aggregateSalesByAgent(sales) {
         skadeCount: 0,
         totalPremium: 0,
         totalCount: 0,
-        salary_level: sale.salary_level || 1 // Use the salary level from data or default to 1
+        salary_level: salary_level || null // Use the salary level from data if available
       };
     }
 
@@ -258,6 +331,12 @@ function SalesDataDashboard() {
     setLoading(true);
     
     try {
+      // Fetch employees first to get salary levels
+      const employeesResponse = await supabase.from("employees").select("name,agent_id,salary_model_id");
+      const employees = employeesResponse.data || [];
+      
+      console.log("Loaded employees:", employees);
+      
       // Fetch sales data and salary models in parallel
       const [salesResponse, modelsResponse] = await Promise.all([
         supabase.from("sales_data").select("*"),
@@ -271,19 +350,38 @@ function SalesDataDashboard() {
       const salesData = salesResponse.data;
       const models = modelsResponse;
       
+      // Map agent names to their salary model IDs
+      const agentSalaryMap = {};
+      employees.forEach(emp => {
+        if (emp.name && emp.salary_model_id) {
+          agentSalaryMap[emp.name] = emp.salary_model_id;
+        }
+      });
+      
+      console.log("Agent salary mapping:", agentSalaryMap);
+      
+      // Add salary_level to sales data based on agent name
+      const enrichedSalesData = salesData.map(sale => {
+        // If the sale doesn't have a salary_level but we have a mapping for the agent
+        if (sale.agent_name && agentSalaryMap[sale.agent_name]) {
+          return {
+            ...sale,
+            salary_level: sale.salary_level || agentSalaryMap[sale.agent_name]
+          };
+        }
+        return sale;
+      });
+      
       setSalaryModels(models);
       
-      // Log the first few items to debug the data structure
-      console.log("DEBUG: Sample data from Supabase:", 
-        salesData.slice(0, 3).map(item => ({
-          agent: item.agent_id,
-          net_premium_raw: item.net_premium_sales,
-          type: typeof item.net_premium_sales
-        }))
-      );
-
-      // Use the new aggregation function
-      const { agents, uniqueMonths } = aggregateSalesByAgent(salesData);
+      // Use the new aggregation function with enriched data
+      const { agents, uniqueMonths } = aggregateSalesByAgent(enrichedSalesData);
+      
+      // Debug output of the first few agents with their salary levels
+      console.log("Agents with salary levels:", agents.slice(0, 5).map(a => ({
+        agent: a.agent_name,
+        salaryLevel: a.salary_level
+      })));
       
       // Calculate summary statistics
       const stats = {
@@ -295,22 +393,90 @@ function SalesDataDashboard() {
       
       // Calculate total commission
       stats.totalCommission = agents.reduce((sum, agent) => {
-        const livCommission = calculateCommission(agent.livPremium, models, "Liv");
-        const skadeCommission = calculateCommission(agent.skadePremium, models, "Skadeforsikring");
-        return sum + livCommission + skadeCommission;
+        const commission = calculateCommission(agent, models);
+        return sum + commission.totalCommission;
       }, 0);
       
       setSummaryStats(stats);
       setAllRows(agents);
-      
-      // Debug logs
-      console.log("DEBUG: First 3 agents:", agents.slice(0, 3));
       
       // Process data for charts
       processChartData(salesData);
       
     } catch (error) {
       console.error("Error fetching data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // New function to update both sales data and salary models
+  const refreshData = async () => {
+    setLoading(true);
+    
+    try {
+      // First fetch employees to get salary levels
+      const employeesResponse = await supabase.from("employees").select("name,agent_id,salary_model_id");
+      const employees = employeesResponse.data || [];
+      
+      // Fetch updated salary models
+      const updatedModels = await fetchSalaryModels();
+      setSalaryModels(updatedModels);
+      console.log("Salary models refreshed:", updatedModels);
+      
+      // Then refresh sales data
+      const { data: salesData, error } = await supabase.from("sales_data").select("*");
+      
+      if (error) {
+        throw new Error(`Feil ved henting av salgsdata: ${error.message}`);
+      }
+      
+      // Map agent names to their salary model IDs
+      const agentSalaryMap = {};
+      employees.forEach(emp => {
+        if (emp.name && emp.salary_model_id) {
+          agentSalaryMap[emp.name] = emp.salary_model_id;
+        }
+      });
+      
+      // Add salary_level to sales data based on agent name
+      const enrichedSalesData = salesData.map(sale => {
+        if (sale.agent_name && agentSalaryMap[sale.agent_name]) {
+          return {
+            ...sale,
+            salary_level: sale.salary_level || agentSalaryMap[sale.agent_name]
+          };
+        }
+        return sale;
+      });
+      
+      // Re-aggregate sales data
+      const { agents, uniqueMonths } = aggregateSalesByAgent(enrichedSalesData);
+      
+      // Recalculate summary statistics with updated salary models
+      const stats = {
+        totalPremium: agents.reduce((sum, agent) => sum + agent.totalPremium, 0),
+        totalSales: agents.reduce((sum, agent) => sum + agent.totalCount, 0),
+        totalCommission: 0,
+        agentCount: new Set(agents.map(agent => agent.agent_id)).size
+      };
+      
+      // Calculate total commission with updated models
+      stats.totalCommission = agents.reduce((sum, agent) => {
+        const commission = calculateCommission(agent, updatedModels);
+        return sum + commission.totalCommission;
+      }, 0);
+      
+      setSummaryStats(stats);
+      setAllRows(agents);
+      
+      // Process data for charts
+      processChartData(salesData);
+      
+      console.log("Data refreshed successfully");
+      
+    } catch (error) {
+      console.error("Error refreshing data:", error);
     } finally {
       setLoading(false);
     }
@@ -479,7 +645,10 @@ function SalesDataDashboard() {
     {
       id: 'livCommission',
       header: 'Liv Provisjon',
-      accessorFn: row => calculateCommission(row.livPremium, salaryModels, "Liv"),
+      accessorFn: row => {
+        const commission = calculateCommission(row, salaryModels);
+        return commission.livCommission;
+      },
       cell: info => <FormattedCell value={info.getValue()} type="money" color={theme.palette.info.dark} />,
     },
     {
@@ -495,7 +664,10 @@ function SalesDataDashboard() {
     {
       id: 'skadeCommission',
       header: 'Skade Provisjon',
-      accessorFn: row => calculateCommission(row.skadePremium, salaryModels, "Skadeforsikring"),
+      accessorFn: row => {
+        const commission = calculateCommission(row, salaryModels);
+        return commission.skadeCommission;
+      },
       cell: info => <FormattedCell value={info.getValue()} type="money" color={theme.palette.secondary.dark} />,
     },
     {
@@ -512,9 +684,8 @@ function SalesDataDashboard() {
       id: 'totalCommission',
       header: 'Total Provisjon',
       accessorFn: row => {
-        const livCommission = calculateCommission(row.livPremium, salaryModels, "Liv");
-        const skadeCommission = calculateCommission(row.skadePremium, salaryModels, "Skadeforsikring");
-        return livCommission + skadeCommission;
+        const commission = calculateCommission(row, salaryModels);
+        return commission.totalCommission;
       },
       cell: info => <FormattedCell value={info.getValue()} type="money" color={theme.palette.success.dark} />,
     },
@@ -645,8 +816,8 @@ function SalesDataDashboard() {
               <Typography variant="h6">Filtrer data</Typography>
             </Box>
             <Box>
-              <Tooltip title="Oppdater data">
-                <IconButton onClick={fetchData} color="primary">
+              <Tooltip title="Oppdater data og lønnstrinn">
+                <IconButton onClick={refreshData} color="primary">
                   <Refresh />
                 </IconButton>
               </Tooltip>
