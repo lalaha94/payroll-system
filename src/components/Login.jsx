@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../supabaseClient';
 import {
@@ -32,6 +32,74 @@ function Login() {
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
 
+  // Check if already logged in
+  useEffect(() => {
+    const checkSession = async () => {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session) {
+        redirectBasedOnRole(data.session.user);
+      }
+    };
+    
+    checkSession();
+  }, [navigate]);
+  
+  // Helper function to redirect based on user role
+  const redirectBasedOnRole = async (user) => {
+    try {
+      console.log("Login - Full user data:", user);
+      
+      // Check multiple possible metadata fields for role
+      const metadataRole = user.user_metadata?.role || 
+                           user.user_metadata?.is_admin === true ? 'admin' : 
+                           user.user_metadata?.is_super_admin === true ? 'admin' : null;
+      
+      if (metadataRole) {
+        console.log("Login - Role derived from metadata or admin flags:", metadataRole);
+        
+        // Redirect based on role
+        if (metadataRole === 'admin' || metadataRole === 'manager') {
+          navigate('/sales-dashboard');
+          return;
+        } else {
+          navigate('/agent-dashboard');
+          return;
+        }
+      }
+      
+      console.log("Login - No role in metadata, checking database...");
+      
+      // Fallback to check the custom users table
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('email', user.email)
+        .single();
+      
+      console.log("Login - Database user data:", userData, "Error:", userError);
+      
+      // Determine the user's role and redirect
+      if (!userError && userData?.role) {
+        const effectiveRole = userData.role;
+        console.log("Login - Role from database:", effectiveRole);
+        
+        // Redirect based on role
+        if (effectiveRole === 'admin' || effectiveRole === 'manager') {
+          navigate('/sales-dashboard');
+        } else {
+          navigate('/agent-dashboard');
+        }
+      } else {
+        console.log("Login - No role found, defaulting to agent dashboard");
+        // Default redirect
+        navigate('/agent-dashboard');
+      }
+    } catch (error) {
+      console.error("Error checking user role:", error);
+      navigate('/agent-dashboard');
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError(null);
@@ -46,7 +114,7 @@ function Login() {
       if (error) throw error;
       
       // Successful login
-      navigate('/sales-dashboard');
+      redirectBasedOnRole(data.user);
     } catch (error) {
       console.error('Error logging in:', error);
       setError(error.message || 'En feil oppstod ved innlogging. Vennligst prøv igjen.');

@@ -153,11 +153,11 @@ function SalaryModels() {
       }
       
       if (currentModel.id) {
-        // Oppdatering
+        // Oppdatering - bruk match() for å unngå problemer med parametere
         const { data, error } = await supabase
           .from("salary_models")
           .update(modelToSave)
-          .eq("id", currentModel.id)
+          .match({ id: currentModel.id })
           .select();
 
         if (error) {
@@ -197,16 +197,25 @@ function SalaryModels() {
     if (window.confirm("Er du sikker på at du vil slette dette lønnstrinnet?")) {
       setLoading(true);
       
-      const { error } = await supabase.from("salary_models").delete().eq("id", id);
-      
-      if (error) {
-        console.error("Sletting feilet:", error);
-        setUploadError("Sletting feilet: " + error.message);
-      } else {
-        setModels(models.filter((m) => m.id !== id));
+      try {
+        const { error } = await supabase
+          .from("salary_models")
+          .delete()
+          .match({ id });
+        
+        if (error) {
+          console.error("Sletting feilet:", error);
+          setUploadError("Sletting feilet: " + error.message);
+        } else {
+          setModels(models.filter((m) => m.id !== id));
+          setUploadSuccess(true);
+        }
+      } catch (error) {
+        console.error("Feil under sletting:", error);
+        setUploadError("Feil ved sletting: " + error.message);
+      } finally {
+        setLoading(false);
       }
-      
-      setLoading(false);
     }
   };
   

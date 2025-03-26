@@ -252,7 +252,8 @@ function SalesData() {
         // Valider og håndter cancel_code for å oppfylle databasebegrensninger
         // Hvis verdien er null, undefined eller tom streng, sett den til null
         if (sale.cancel_code === null || sale.cancel_code === undefined || 
-            (typeof sale.cancel_code === 'string' && sale.cancel_code.trim() === '')) {
+            (typeof sale.cancel_code === 'string' && sale.cancel_code.trim() === '') ||
+            sale.cancel_code === 0) {
           sale.cancel_code = null;
         } 
         // Hvis det er et tall, konverter til streng
@@ -263,6 +264,12 @@ function SalesData() {
         // Hvis den inneholder ikke-numeriske tegn, trunkeres den til 10 tegn
         else if (typeof sale.cancel_code === 'string' && sale.cancel_code.length > 10) {
           sale.cancel_code = sale.cancel_code.substring(0, 10);
+        }
+        // Sjekk for andre begrensninger på cancel_code
+        // For eksempel, sørg for at den kun inneholder alfanumeriske tegn
+        if (typeof sale.cancel_code === 'string' && !/^[a-zA-Z0-9]*$/.test(sale.cancel_code)) {
+          // Hvis den inneholder ikke-alfanumeriske tegn, fjern dem
+          sale.cancel_code = sale.cancel_code.replace(/[^a-zA-Z0-9]/g, '');
         }
 
         return sale;
@@ -340,10 +347,17 @@ function SalesData() {
     
     // Håndter cancel_code
     let processedCancelCode = editingSale.cancel_code;
-    if (processedCancelCode === "" || processedCancelCode === undefined) {
+    
+    if (processedCancelCode === "" || processedCancelCode === undefined || processedCancelCode === 0) {
       processedCancelCode = null;
-    } else if (typeof processedCancelCode === 'string' && processedCancelCode.length > 10) {
-      processedCancelCode = processedCancelCode.substring(0, 10);
+    } else if (typeof processedCancelCode === 'string') {
+      // Ensure it only contains alphanumeric characters
+      processedCancelCode = processedCancelCode.replace(/[^a-zA-Z0-9]/g, '');
+      
+      // Truncate to 10 chars if needed
+      if (processedCancelCode.length > 10) {
+        processedCancelCode = processedCancelCode.substring(0, 10);
+      }
     }
 
     // Kall fixDate her også, slik at brukeren kan skrive "12.3.2024" i dialogen
@@ -378,16 +392,13 @@ function SalesData() {
   const handleDeleteSale = async (id) => {
     if (window.confirm("Er du sikker på at du vil slette denne salgsraden?")) {
       setLoading(true);
-      
       const { error } = await supabase.from("sales_data").delete().eq("id", id);
-      
       if (error) {
         console.error("Sletting feilet:", error);
         setUploadError("Sletting feilet: " + error.message);
       } else {
         setSales((prev) => prev.filter((s) => s.id !== id));
       }
-      
       setLoading(false);
     }
   };
@@ -402,9 +413,7 @@ function SalesData() {
       (sale.customer_name && sale.customer_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (sale.product_name && sale.product_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (sale.src_policy_id && sale.src_policy_id.toString().includes(searchTerm));
-    
     const matchesAgent = agentFilter === "" || sale.agent_name === agentFilter;
-    
     return matchesSearch && matchesAgent;
   });
 
@@ -420,21 +429,18 @@ function SalesData() {
               <InsertDriveFile sx={{ mr: 1 }} color="primary" />
               Importer salgsdata fra fil
             </Typography>
-            
             {uploadSuccess && !file && (
               <Alert severity="success" sx={{ mb: 3 }}>
                 <AlertTitle>Suksess</AlertTitle>
                 {importMessage || "Data ble lastet opp og behandlet"}
               </Alert>
             )}
-            
             {uploadError && (
               <Alert severity="error" sx={{ mb: 3 }}>
                 <AlertTitle>Feil</AlertTitle>
                 {uploadError}
               </Alert>
             )}
-            
             <Grid container spacing={2} alignItems="center">
               <Grid item xs={12} md={4}>
                 <Button
@@ -475,7 +481,7 @@ function SalesData() {
               
               <Grid item xs={12} md={4}>
                 <Button
-                  variant="contained"
+                  variant="contained" 
                   color="primary"
                   startIcon={<CloudUpload />}
                   fullWidth

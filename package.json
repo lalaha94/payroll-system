@@ -42,6 +42,7 @@
     "postcss": "^8.5.3",
     "postcss-import": "^16.1.0",
     "postcss-nested": "^7.0.2",
+    "supabase": "^2.20.3",
     "vite": "^6.2.2"
   }
 }

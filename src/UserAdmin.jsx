@@ -155,7 +155,8 @@ function UserAdmin() {
           user.id === currentUser.id ? { ...user, ...currentUser } : user
         ));
         
-        setSuccess('Bruker oppdatert');
+        setSuccess('Bruker oppdatert. Husk å oppdatere brukerens rolle i Supabase Auth konsollen.');
+        alert('VIKTIG: For at rolleendringen skal tre i kraft må du også oppdatere brukerens rolle i Supabase Authentication konsollen under User Management. Legg til {"role": "' + currentUser.role + '"} under metadata.');
       } else {
         // Create new user
         if (!currentUser.email || !currentUser.name) {
@@ -163,9 +164,7 @@ function UserAdmin() {
           return;
         }
         
-        // We can't create users through the client API directly without a password
-        // The regular signup flow should be used instead, but here's how to create
-        // an entry in your users table for tracking:
+        // Create user in our custom table
         const { data, error } = await supabase
           .from('users')
           .insert([{
@@ -180,13 +179,16 @@ function UserAdmin() {
         
         setUsers([...users, data[0]]);
         setSuccess('Bruker opprettet. Brukeren må registrere seg med samme e-post.');
+        
+        // Show clear instructions for admin
+        alert('VIKTIG: For at brukeren skal få riktige tilganger må du opprette brukeren i Supabase Authentication og legge til {"role": "' + currentUser.role + '"} under metadata.');
       }
       
       // Close dialog
       handleCloseDialog();
       
       // Clear success message after 3 seconds
-      setTimeout(() => setSuccess(null), 3000);
+      setTimeout(() => setSuccess(null), 5000);
     } catch (error) {
       console.error('Error saving user:', error);
       setError('Kunne ikke lagre bruker: ' + error.message);

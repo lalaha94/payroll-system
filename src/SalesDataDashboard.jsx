@@ -188,6 +188,9 @@ function aggregateSalesByAgent(sales) {
   const uniqueMonths = new Set();
 
   for (const sale of sales) {
+    // Skip sales with cancel_code
+    if (sale.cancel_code) continue;
+    
     const { agent_id, agent_name, policy_sale_date, provisjonsgruppe, salary_level } = sale;
     const monthKey = getMonthKey(policy_sale_date);
     uniqueMonths.add(monthKey);
@@ -490,9 +493,10 @@ function SalesDataDashboard() {
     const agentMap = {};
     const reasonMap = {};
     
+    // First pass: Aggregate sales data by month
     salesData.forEach(sale => {
-      // Skip entries without valid dates or amounts
-      if (!sale.policy_sale_date || !sale.net_premium_sales) return;
+      // Skip entries without valid dates or amounts, or with cancel_code
+      if (!sale.policy_sale_date || !sale.net_premium_sales || sale.cancel_code) return;
       
       // Process monthly data
       const date = new Date(sale.policy_sale_date);
@@ -503,14 +507,59 @@ function SalesDataDashboard() {
         monthMap[monthKey] = {
           month: monthKey,
           sales: 0,
-          commission: 0,
-          count: 0
+          livSales: 0,
+          skadeSales: 0,
+          commission: 0,  // This will be recalculated later based on salary models
+          count: 0,
+          agentSales: {} // To track per-agent sales for this month
         };
       }
       
-      monthMap[monthKey].sales += Number(sale.net_premium_sales) || 0;
-      monthMap[monthKey].commission += Number(sale.commission) || 0;
+      // Determine insurance type with robust check
+      let insuranceType = "";
+      if (sale.provisjonsgruppe) {
+        const grp = (sale.provisjonsgruppe || "").toLowerCase();
+        if (grp.includes("life")) {
+          insuranceType = "Liv";
+        } else if (grp.includes("pc") || grp.includes("child") || grp.includes("skad")) {
+          insuranceType = "Skadeforsikring";
+        } else {
+          insuranceType = sale.provisjonsgruppe;
+        }
+      } else {
+        insuranceType = "Ukjent";
+      }
+      
+      const netPremium = Number(sale.net_premium_sales) || 0;
+      
+      // Add to month totals
+      monthMap[monthKey].sales += netPremium;
       monthMap[monthKey].count += 1;
+      
+      // Track insurance type sales
+      if (insuranceType === "Liv") {
+        monthMap[monthKey].livSales += netPremium;
+      } else if (insuranceType === "Skadeforsikring") {
+        monthMap[monthKey].skadeSales += netPremium;
+      }
+      
+      // Track per-agent sales for this month (for commission calculation)
+      const agentKey = sale.agent_name || sale.agent_id;
+      if (agentKey) {
+        if (!monthMap[monthKey].agentSales[agentKey]) {
+          monthMap[monthKey].agentSales[agentKey] = {
+            livPremium: 0,
+            skadePremium: 0,
+            salary_level: sale.salary_level || null
+          };
+        }
+        
+        if (insuranceType === "Liv") {
+          monthMap[monthKey].agentSales[agentKey].livPremium += netPremium;
+        } else if (insuranceType === "Skadeforsikring") {
+          monthMap[monthKey].agentSales[agentKey].skadePremium += netPremium;
+        }
+      }
       
       // Process product distribution data
       if (sale.product_name) {
@@ -554,7 +603,52 @@ function SalesDataDashboard() {
       }
     });
     
-    // Convert to arrays and sort
+    // Second pass: Calculate commission correctly using salary models
+    Object.values(monthMap).forEach(monthData => {
+      let totalCommission = 0;
+      
+      // For each agent in this month
+      Object.entries(monthData.agentSales).forEach(([agentKey, salesData]) => {
+        // Find the agent's salary model
+        const model = salaryModels.find(m => parseInt(m.id) === parseInt(salesData.salary_level));
+        
+        // Fallback to first model or defaults
+        const activeModel = model || salaryModels[0] || {
+          commission_liv: 0,
+          commission_skade: 0,
+          bonus_enabled: false
+        };
+        
+        // Calculate base commissions
+        let livRate = parseFloat(activeModel.commission_liv) || 0;
+        let skadeRate = parseFloat(activeModel.commission_skade) || 0;
+        
+        let livCommission = salesData.livPremium * livRate / 100;
+        let skadeCommission = salesData.skadePremium * skadeRate / 100;
+        
+        // Check for bonus threshold
+        const totalPremium = salesData.livPremium + salesData.skadePremium;
+        
+        if (activeModel.bonus_enabled && 
+            activeModel.bonus_threshold && 
+            totalPremium >= parseFloat(activeModel.bonus_threshold)) {
+          
+          // Add bonus commission
+          const bonusLivRate = parseFloat(activeModel.bonus_percentage_liv) || 0;
+          const bonusSkadeRate = parseFloat(activeModel.bonus_percentage_skade) || 0;
+          
+          livCommission += salesData.livPremium * bonusLivRate / 100;
+          skadeCommission += salesData.skadePremium * bonusSkadeRate / 100;
+        }
+        
+        totalCommission += (livCommission + skadeCommission);
+      });
+      
+      // Update the month's commission with calculated value
+      monthData.commission = totalCommission;
+    });
+    
+    // Convert to arrays and sort for the charts
     setMonthlyData(Object.values(monthMap)
       .sort((a, b) => a.month.localeCompare(b.month))
       .map(item => ({
