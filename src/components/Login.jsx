@@ -50,16 +50,23 @@ function Login() {
       console.log("Login - Full user data:", user);
       
       // Check multiple possible metadata fields for role
-      const metadataRole = user.user_metadata?.role || 
-                           user.user_metadata?.is_admin === true ? 'admin' : 
-                           user.user_metadata?.is_super_admin === true ? 'admin' : null;
-      
+      let metadataRole = null;
+
+      if (user.user_metadata?.is_super_admin === true || user.user_metadata?.is_admin === true) {
+        metadataRole = 'admin';
+      } else if (user.user_metadata?.role) {
+        metadataRole = user.user_metadata.role;
+      }
+
       if (metadataRole) {
         console.log("Login - Role derived from metadata or admin flags:", metadataRole);
         
         // Redirect based on role
-        if (metadataRole === 'admin' || metadataRole === 'manager') {
+        if (metadataRole === 'admin') {
           navigate('/sales-dashboard');
+          return;
+        } else if (metadataRole === 'manager') {
+          navigate('/office-dashboard');
           return;
         } else {
           navigate('/agent-dashboard');
@@ -84,8 +91,10 @@ function Login() {
         console.log("Login - Role from database:", effectiveRole);
         
         // Redirect based on role
-        if (effectiveRole === 'admin' || effectiveRole === 'manager') {
+        if (effectiveRole === 'admin') {
           navigate('/sales-dashboard');
+        } else if (effectiveRole === 'manager') {
+          navigate('/office-dashboard');
         } else {
           navigate('/agent-dashboard');
         }

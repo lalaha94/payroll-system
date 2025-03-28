@@ -1,42 +1,43 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
 import * as XLSX from "xlsx";
-import { supabase } from "./supabaseClient";
-import { Link } from "react-router-dom";
 import {
-  Container,
+  Box,
   Typography,
   Paper,
   Button,
+  IconButton,
   TextField,
-  Box,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Grid as MuiGrid,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  MenuItem,
-  Grid as MuiGrid,
-  Table,
-  TableHead,
-  TableBody,
-  TableRow,
-  TableCell,
-  TableContainer,  // Added this import
-  Tabs,
-  Tab,
-  IconButton,
-  Tooltip,
-  Stack,
+  Chip,
   Alert,
   AlertTitle,
-  Chip,
   InputAdornment,
   CircularProgress,
-} from "@mui/material";
+  Tabs,
+  Tab,
+  Tooltip,
+  Stack,
+} from '@mui/material';
 import {
   Add,
-  CloudUpload,
-  Delete,
   Edit,
+  Delete,
+  Close,
   Refresh,
   Search,
   Save,
@@ -45,124 +46,277 @@ import {
   Group,
   UploadFile,
   Business,
-} from "@mui/icons-material";
-import { useTheme } from "@mui/material/styles";
-import NavigationMenu from "./components/NavigationMenu";
+  CloudUpload,
+} from '@mui/icons-material';
+import { useTheme } from '@mui/material/styles';
+import NavigationMenu from './components/NavigationMenu';
 
 function Employees() {
   const theme = useTheme();
-  // Data og state
   const [employees, setEmployees] = useState([]);
-  const [salaryModels, setSalaryModels] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedDepartment, setSelectedDepartment] = useState("Alle");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [uploadSuccess, setUploadSuccess] = useState(false);
-  const [uploadError, setUploadError] = useState(null);
-
-  // For manuell oppretting av ansatt
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+  const [salaryModels, setSalaryModels] = useState([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   const [newEmployee, setNewEmployee] = useState({
-    name: "",
-    agent_id: "",
-    agent_company: "",
-    position: "",
-    start_date: "",
-    salary_model_id: "",
+    name: '',
+    email: '',
+    agent_id: '',
+    agent_company: '',
+    position: '',
+    salary_model_id: '',
+    role: 'user',
+    new_agent_company: ''
   });
-
-  // For filopplasting (import)
+  const [editMode, setEditMode] = useState(false);
+  const [userRole, setUserRole] = useState('user');
+  const [userOffice, setUserOffice] = useState(null);
+  const [departments, setDepartments] = useState([]);
+  
+  // For file uploads (import)
   const [file, setFile] = useState(null);
   const [importMessage, setImportMessage] = useState("");
   const [fileName, setFileName] = useState("");
-
-  // For redigeringsdialog
-  const [openEditDialog, setOpenEditDialog] = useState(false);
-  const [editingEmployee, setEditingEmployee] = useState(null);
-
-  // Hent ansatte fra Supabase
+  const [uploadSuccess, setUploadSuccess] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+  
+  // For filtering by department/office
+  const [selectedDepartment, setSelectedDepartment] = useState("Alle");
+  
   useEffect(() => {
-    fetchEmployees();
+    fetchCurrentUser();
   }, []);
+
+  const fetchCurrentUser = async () => {
+    try {
+      const session = await supabase.auth.getSession();
+      const user = session.data?.session?.user;
+      
+      if (!user) return;
+      
+      // Determine user's role and office
+      const { data: employeeData, error: employeeError } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('email', user.email)
+        .single();
+      
+      if (employeeData) {
+        // Get role from metadata first, then fallback to DB
+        const metadataRole = user.user_metadata?.role || employeeData.role || 'user';
+        setUserRole(metadataRole);
+        setUserOffice(employeeData.agent_company);
+        
+        console.log("User role and office:", metadataRole, employeeData.agent_company);
+      }
+      
+      // Load employees after determining user role/office
+      fetchEmployees();
+      fetchSalaryModels();
+    } catch (error) {
+      console.error("Error fetching current user:", error);
+    }
+  };
 
   const fetchEmployees = async () => {
     setLoading(true);
-    const { data, error } = await supabase.from("employees").select("*");
-    if (error) {
-      console.error("Feil ved henting av ansatte:", error);
-      setUploadError("Kunne ikke hente ansatte data");
-    } else {
-      setEmployees(data || []);
-    }
-    setLoading(false);
-  };
-
-  // Hent lønnstrinn fra Supabase
-  useEffect(() => {
-    async function fetchSalaryModels() {
-      const { data, error } = await supabase.from("salary_models").select("*");
-      if (error) {
-        console.error("Feil ved henting av lønnstrinn:", error);
-        setUploadError("Kunne ikke hente lønnstrinn data");
-      } else {
-        setSalaryModels(data);
-      }
-    }
-    fetchSalaryModels();
-  }, []);
-
-  // Filtrer ansatte basert på valgt avdeling og søketerm
-  const departments = [
-    "Alle",
-    ...new Set(employees.map((emp) => emp.agent_company).filter(Boolean)),
-  ];
-  
-  const filteredEmployees = employees.filter((emp) => {
-    const matchesDepartment = selectedDepartment === "Alle" || emp.agent_company === selectedDepartment;
-    const matchesSearch = 
-      searchTerm === "" || 
-      (emp.name && emp.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (emp.agent_id && emp.agent_id.toString().includes(searchTerm)) ||
-      (emp.position && emp.position.toLowerCase().includes(searchTerm.toLowerCase()));
+    setError(null);
     
-    return matchesDepartment && matchesSearch;
-  });
-
-  // Manuell oppretting av ansatt
-  const handleAddEmployee = async () => {
-    if (!newEmployee.name || !newEmployee.agent_id || !newEmployee.agent_company) {
-      setUploadError("Fyll ut minst Name, Agent ID og Avdeling!");
-      return;
-    }
-    
-    setLoading(true);
-    setUploadSuccess(false);
-    setUploadError(null);
-    
-    const { data, error } = await supabase
-      .from("employees")
-      .insert([newEmployee])
-      .select();
+    try {
+      let query = supabase.from('employees').select('*');
       
-    if (error) {
-      console.error("Innsetting feilet:", error);
-      setUploadError("Innsetting feilet: " + error.message);
-    } else if (data) {
-      setEmployees([...employees, ...data]);
-      setNewEmployee({
-        name: "",
-        agent_id: "",
-        agent_company: "",
-        position: "",
-        start_date: "",
-        salary_model_id: "",
-      });
-      setUploadSuccess(true);
+      // Filter by office if user is a manager
+      if (userRole === 'manager' && userOffice) {
+        query = query.eq('agent_company', userOffice);
+      }
+      
+      const { data, error } = await query;
+      
+      if (error) throw error;
+      
+      setEmployees(data || []);
+
+      // Extract unique departments (agent_company values)
+      const uniqueDepartments = Array.from(
+        new Set(data.filter(emp => emp.agent_company).map(emp => emp.agent_company))
+      ).sort();
+      
+      setDepartments(uniqueDepartments);
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+      setError('Failed to fetch employees: ' + error.message);
+      setUploadError('Failed to fetch employees: ' + error.message);
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
-  // Filopplasting for import
+  const fetchSalaryModels = async () => {
+    try {
+      const { data, error } = await supabase.from('salary_models').select('*');
+      
+      if (error) throw error;
+      
+      setSalaryModels(data || []);
+    } catch (error) {
+      console.error('Error fetching salary models:', error);
+      setError('Failed to fetch salary models: ' + error.message);
+      setUploadError('Failed to fetch salary models: ' + error.message);
+    }
+  };
+
+  const handleOpenDialog = (employee = null) => {
+    if (employee) {
+      setNewEmployee({
+        id: employee.id,
+        name: employee.name || '',
+        email: employee.email || '',
+        agent_id: employee.agent_id || '',
+        agent_company: employee.agent_company || '',
+        position: employee.position || '',
+        salary_model_id: employee.salary_model_id || '',
+        role: employee.role || 'user',
+        new_agent_company: ''
+      });
+      setEditMode(true);
+    } else {
+      setNewEmployee({
+        name: '',
+        email: '',
+        agent_id: '',
+        agent_company: userRole === 'manager' ? userOffice : '',
+        position: 'Rådgiver', // Default position
+        salary_model_id: '',
+        role: 'user',
+        new_agent_company: ''
+      });
+      setEditMode(false);
+    }
+    
+    setDialogOpen(true);
+  };
+
+  const handleCloseDialog = () => {
+    setDialogOpen(false);
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setNewEmployee({
+      ...newEmployee,
+      [name]: value,
+    });
+  };
+
+  const handleDeleteEmployee = async (id) => {
+    try {
+      // For managers, verify the employee belongs to their office before deletion
+      if (userRole === 'manager') {
+        const employeeToDelete = employees.find(emp => emp.id === id);
+        if (!employeeToDelete || employeeToDelete.agent_company !== userOffice) {
+          setError('You can only delete employees from your own office');
+          setUploadError('You can only delete employees from your own office');
+          return;
+        }
+      }
+      
+      if (!window.confirm('Er du sikker på at du vil slette denne ansatte?')) {
+        return;
+      }
+      
+      const { error } = await supabase.from('employees').delete().eq('id', id);
+      
+      if (error) throw error;
+      
+      setEmployees(employees.filter(emp => emp.id !== id));
+      setSuccess('Employee deleted successfully');
+      setUploadSuccess(true);
+      
+      setTimeout(() => {
+        setSuccess(null);
+        setUploadSuccess(false);
+      }, 3000);
+    } catch (error) {
+      console.error('Error deleting employee:', error);
+      setError('Failed to delete employee: ' + error.message);
+      setUploadError('Failed to delete employee: ' + error.message);
+    }
+  };
+
+  const handleSaveEmployee = async (e) => {
+    e.preventDefault();
+    
+    try {
+      setError(null);
+      setUploadError(null);
+      setLoading(true);
+      
+      // Process the actual company name if "new_department" was selected
+      let finalCompany = newEmployee.agent_company;
+      if (newEmployee.agent_company === 'new_department' && newEmployee.new_agent_company) {
+        finalCompany = newEmployee.new_agent_company.trim();
+      }
+      
+      // If manager, ensure they can only create/edit employees in their own office
+      if (userRole === 'manager') {
+        finalCompany = userOffice;
+        
+        // Managers can only create regular users, not other managers or admins
+        if (editMode === false) {
+          newEmployee.role = 'user';
+        }
+      }
+      
+      const employeeData = {
+        ...newEmployee,
+        agent_company: finalCompany
+      };
+      
+      // Remove any temporary fields
+      delete employeeData.new_agent_company;
+      
+      if (editMode) {
+        const { id, ...updateData } = employeeData;
+        const { error } = await supabase.from('employees').update(updateData).eq('id', id);
+        
+        if (error) throw error;
+        
+        setEmployees(employees.map(emp => (emp.id === id ? { ...emp, ...updateData } : emp)));
+        setSuccess('Employee updated successfully');
+        setUploadSuccess(true);
+      } else {
+        const { data, error } = await supabase.from('employees').insert([employeeData]).select();
+        
+        if (error) throw error;
+        
+        setEmployees([...employees, data[0]]);
+        setSuccess('Employee added successfully');
+        setUploadSuccess(true);
+        
+        // If a new department was added, update the departments list
+        if (finalCompany && !departments.includes(finalCompany)) {
+          setDepartments([...departments, finalCompany].sort());
+        }
+      }
+      
+      setTimeout(() => {
+        setSuccess(null);
+        setUploadSuccess(false);
+      }, 3000);
+      
+      handleCloseDialog();
+    } catch (error) {
+      console.error('Error saving employee:', error);
+      setError('Failed to save employee: ' + error.message);
+      setUploadError('Failed to save employee: ' + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // File upload handling for import
   const handleFileUpload = (e) => {
     const uploadedFile = e.target.files[0];
     if (!uploadedFile) return;
@@ -222,6 +376,14 @@ function Employees() {
         new Map(validEmployees.map((emp) => [emp.name, emp])).values()
       );
       
+      // If manager, ensure all employees are assigned to manager's office
+      if (userRole === 'manager' && userOffice) {
+        uniqueByName.forEach(emp => {
+          emp.agent_company = userOffice;
+          emp.role = 'user';  // Ensure only user role is set
+        });
+      }
+      
       const { data: upsertData, error } = await supabase
         .from("employees")
         .upsert(uniqueByName, { onConflict: "name" })
@@ -231,7 +393,7 @@ function Employees() {
         console.error("Import feilet:", error);
         setUploadError("Import feilet: " + error.message);
       } else {
-        setEmployees([...employees, ...upsertData]);
+        setEmployees([...employees.filter(e => !upsertData.some(u => u.id === e.id)), ...upsertData]);
         setUploadSuccess(true);
         setImportMessage(`Import vellykket: ${upsertData.length} oppføringer behandlet.`);
         setFile(null);
@@ -252,72 +414,32 @@ function Employees() {
     setImportMessage("");
   };
 
-  // Redigeringsdialog
-  const handleOpenEditDialog = (emp) => {
-    setEditingEmployee({...emp});
-    setOpenEditDialog(true);
-  };
+  // Extract unique department names
+  const allDepartments = [
+    "Alle",
+    ...Array.from(new Set(employees.filter(emp => emp.agent_company).map(emp => emp.agent_company)))
+  ];
 
-  const handleCloseEditDialog = () => {
-    setEditingEmployee(null);
-    setOpenEditDialog(false);
-  };
-
-  const handleUpdateEmployee = async () => {
-    if (!editingEmployee) return;
+  // Filter employees based on search and selected department
+  const filteredEmployees = employees.filter(employee => {
+    const matchesDepartment = selectedDepartment === "Alle" || employee.agent_company === selectedDepartment;
+    const searchFields = [
+      employee.name,
+      employee.email,
+      employee.agent_id,
+      employee.agent_company,
+      employee.position
+    ].filter(Boolean).join(' ').toLowerCase();
     
-    setLoading(true);
+    const matchesSearch = searchTerm === "" || searchFields.includes(searchTerm.toLowerCase());
     
-    const { data, error } = await supabase
-      .from("employees")
-      .update({
-        name: editingEmployee.name,
-        agent_id: editingEmployee.agent_id,
-        agent_company: editingEmployee.agent_company,
-        position: editingEmployee.position,
-        start_date: editingEmployee.start_date,
-        salary_model_id: editingEmployee.salary_model_id,
-      })
-      .eq("id", editingEmployee.id)
-      .select();
-      
-    if (error) {
-      console.error("Oppdatering feilet:", error);
-      setUploadError("Oppdatering feilet: " + error.message);
-    } else if (data) {
-      setEmployees(
-        employees.map((emp) =>
-          emp.id === editingEmployee.id ? data[0] : emp
-        )
-      );
-      setUploadSuccess(true);
-    }
-    
-    handleCloseEditDialog();
-    setLoading(false);
-  };
-
-  const handleDeleteEmployee = async (id) => {
-    if (window.confirm("Er du sikker på at du vil slette denne ansatte?")) {
-      setLoading(true);
-      
-      const { error } = await supabase.from("employees").delete().eq("id", id);
-      
-      if (error) {
-        console.error("Sletting feilet:", error);
-        setUploadError("Sletting feilet: " + error.message);
-      } else {
-        setEmployees(employees.filter((emp) => emp.id !== id));
-      }
-      
-      setLoading(false);
-    }
-  };
+    return matchesDepartment && matchesSearch;
+  });
 
   return (
     <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
       <NavigationMenu />
-
+      
       <MuiGrid container spacing={3}>
         {/* File Import Section */}
         <MuiGrid item xs={12}>
@@ -330,7 +452,7 @@ function Employees() {
             {uploadSuccess && !file && (
               <Alert severity="success" sx={{ mb: 3 }}>
                 <AlertTitle>Suksess</AlertTitle>
-                {importMessage || "Data ble lastet opp og behandlet"}
+                {importMessage || success || "Data ble lastet opp og behandlet"}
               </Alert>
             )}
             
@@ -408,8 +530,22 @@ function Employees() {
               <MuiGrid item xs={12}>
                 <TextField
                   label="Navn"
+                  name="name"
                   value={newEmployee.name}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
+                  onChange={handleInputChange}
+                  fullWidth
+                  required
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12}>
+                <TextField
+                  label="Email"
+                  name="email"
+                  type="email"
+                  value={newEmployee.email}
+                  onChange={handleInputChange}
                   fullWidth
                   required
                   size="small"
@@ -419,8 +555,9 @@ function Employees() {
               <MuiGrid item xs={12}>
                 <TextField
                   label="Agent ID"
+                  name="agent_id"
                   value={newEmployee.agent_id}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, agent_id: e.target.value })}
+                  onChange={handleInputChange}
                   fullWidth
                   required
                   size="small"
@@ -428,33 +565,59 @@ function Employees() {
               </MuiGrid>
               
               <MuiGrid item xs={12}>
-                <TextField
-                  label="Avdeling"
-                  value={newEmployee.agent_company}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, agent_company: e.target.value })}
-                  fullWidth
-                  required
-                  size="small"
-                />
+                <FormControl fullWidth size="small">
+                  <InputLabel>Kontor</InputLabel>
+                  <Select
+                    label="Kontor"
+                    name="agent_company"
+                    value={userRole === 'manager' ? userOffice : newEmployee.agent_company}
+                    onChange={handleInputChange}
+                    required
+                    disabled={userRole === 'manager'}
+                  >
+                    {departments.length > 0 ? (
+                      departments.map(dept => (
+                        <MenuItem key={dept} value={dept}>
+                          {dept}
+                        </MenuItem>
+                      ))
+                    ) : (
+                      <MenuItem value="" disabled>
+                        Ingen kontorer funnet
+                      </MenuItem>
+                    )}
+                    {userRole === 'admin' && (
+                      <MenuItem value="new_department">
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Add fontSize="small" sx={{ mr: 1 }} />
+                          Angi nytt kontor
+                        </Box>
+                      </MenuItem>
+                    )}
+                  </Select>
+                </FormControl>
+                {userRole === 'admin' && newEmployee.agent_company === 'new_department' && (
+                  <TextField
+                    fullWidth
+                    label="Nytt kontor"
+                    value={newEmployee.new_agent_company || ''}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      new_agent_company: e.target.value
+                    })}
+                    size="small"
+                    margin="dense"
+                    required
+                  />
+                )}
               </MuiGrid>
               
               <MuiGrid item xs={12}>
                 <TextField
                   label="Stilling"
+                  name="position"
                   value={newEmployee.position}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, position: e.target.value })}
-                  fullWidth
-                  size="small"
-                />
-              </MuiGrid>
-              
-              <MuiGrid item xs={12}>
-                <TextField
-                  label="Startdato"
-                  type="date"
-                  InputLabelProps={{ shrink: true }}
-                  value={newEmployee.start_date}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, start_date: e.target.value })}
+                  onChange={handleInputChange}
                   fullWidth
                   size="small"
                 />
@@ -464,11 +627,9 @@ function Employees() {
                 <TextField
                   select
                   label="Velg lønnstrinn"
+                  name="salary_model_id"
                   value={newEmployee.salary_model_id}
-                  onChange={(e) => setNewEmployee({
-                    ...newEmployee,
-                    salary_model_id: Number(e.target.value),
-                  })}
+                  onChange={handleInputChange}
                   fullWidth
                   size="small"
                 >
@@ -481,13 +642,32 @@ function Employees() {
                 </TextField>
               </MuiGrid>
               
+              {/* Only show role selector for admins */}
+              {userRole === 'admin' && (
+                <MuiGrid item xs={12}>
+                  <TextField
+                    select
+                    label="Rolle"
+                    name="role"
+                    value={newEmployee.role}
+                    onChange={handleInputChange}
+                    fullWidth
+                    size="small"
+                  >
+                    <MenuItem value="user">Bruker</MenuItem>
+                    <MenuItem value="manager">Kontorleder</MenuItem>
+                    <MenuItem value="admin">Administrator</MenuItem>
+                  </TextField>
+                </MuiGrid>
+              )}
+              
               <MuiGrid item xs={12}>
                 <Button
                   variant="contained"
-                  fullWidth
-                  disabled={loading}
                   startIcon={<Add />}
-                  onClick={handleAddEmployee}
+                  fullWidth
+                  onClick={handleSaveEmployee}
+                  disabled={loading}
                   sx={{ mt: 1 }}
                 >
                   {loading ? "Lagrer..." : "Legg til ansatt"}
@@ -504,6 +684,14 @@ function Employees() {
               <Typography variant="h6" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center' }}>
                 <Group sx={{ mr: 1 }} color="primary" />
                 Ansatte oversikt
+                {userRole === 'manager' && (
+                  <Chip
+                    label={userOffice || 'Ditt kontor'}
+                    size="small"
+                    color="primary"
+                    sx={{ ml: 2 }}
+                  />
+                )}
               </Typography>
               
               <Box>
@@ -543,11 +731,19 @@ function Employees() {
                 variant="scrollable" 
                 scrollButtons="auto"
               >
-                {departments.map((dept, index) => (
+                {allDepartments.map((dept, index) => (
                   <Tab key={index} label={dept} value={dept} />
                 ))}
               </Tabs>
             </Paper>
+            
+            {/* Manager info alert */}
+            {userRole === 'manager' && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Som kontorleder kan du administrere ansatte ved ditt kontor ({userOffice}). 
+                Nye ansatte du registrerer vil automatisk bli tilknyttet dette kontoret.
+              </Alert>
+            )}
             
             {loading ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -558,59 +754,78 @@ function Employees() {
                 <Table>
                   <TableHead>
                     <TableRow>
-                      <TableCell>ID</TableCell>
                       <TableCell>Navn</TableCell>
+                      <TableCell>Email</TableCell>
                       <TableCell>Agent ID</TableCell>
                       <TableCell>Avdeling</TableCell>
                       <TableCell>Stilling</TableCell>
                       <TableCell>Lønnstrinn</TableCell>
+                      {userRole === 'admin' && <TableCell>Rolle</TableCell>}
                       <TableCell>Handlinger</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {filteredEmployees.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={7} align="center">
+                        <TableCell colSpan={userRole === 'admin' ? 8 : 7} align="center">
                           Ingen ansatte funnet
                         </TableCell>
                       </TableRow>
                     ) : (
                       filteredEmployees.map((emp) => {
-                        const model = salaryModels.find(
-                          (m) => Number(m.id) === Number(emp.salary_model_id)
-                        );
+                        const salaryModel = salaryModels.find(model => model.id === emp.salary_model_id);
                         return (
-                          <TableRow key={emp.id}>
-                            <TableCell>{emp.id}</TableCell>
+                          <TableRow key={emp.id} hover>
                             <TableCell>{emp.name}</TableCell>
+                            <TableCell>{emp.email}</TableCell>
                             <TableCell>{emp.agent_id || "Ikke angitt"}</TableCell>
                             <TableCell>
-                              {emp.agent_company ? (
-                                <Chip 
-                                  label={emp.agent_company} 
-                                  size="small" 
-                                  variant="outlined"
-                                  color="primary"
-                                />
-                              ) : "Ikke angitt"}
+                              <Chip 
+                                label={emp.agent_company || 'Not assigned'} 
+                                size="small"
+                                variant="outlined"
+                                color="primary"
+                              />
                             </TableCell>
-                            <TableCell>{emp.position || "Ikke angitt"}</TableCell>
+                            <TableCell>{emp.position}</TableCell>
                             <TableCell>
-                              {model ? (
+                              {salaryModel ? (
                                 <Chip 
-                                  label={model.name} 
+                                  label={salaryModel.name} 
                                   size="small"
                                   variant="outlined"
                                   color="success"
                                 />
                               ) : "Ikke angitt"}
                             </TableCell>
+                            {userRole === 'admin' && (
+                              <TableCell>
+                                <Chip 
+                                  label={emp.role || 'user'} 
+                                  size="small" 
+                                  color={
+                                    emp.role === 'admin' ? 'error' :
+                                    emp.role === 'manager' ? 'warning' :
+                                    'default'
+                                  }
+                                  variant="outlined"
+                                />
+                              </TableCell>
+                            )}
                             <TableCell>
                               <Stack direction="row" spacing={1}>
-                                <IconButton size="small" color="primary" onClick={() => handleOpenEditDialog(emp)}>
+                                <IconButton 
+                                  size="small" 
+                                  color="primary" 
+                                  onClick={() => handleOpenDialog(emp)}
+                                >
                                   <Edit fontSize="small" />
                                 </IconButton>
-                                <IconButton size="small" color="error" onClick={() => handleDeleteEmployee(emp.id)}>
+                                <IconButton 
+                                  size="small" 
+                                  color="error" 
+                                  onClick={() => handleDeleteEmployee(emp.id)}
+                                >
                                   <Delete fontSize="small" />
                                 </IconButton>
                               </Stack>
@@ -628,111 +843,183 @@ function Employees() {
       </MuiGrid>
       
       {/* Edit Employee Dialog */}
-      <Dialog open={openEditDialog} onClose={handleCloseEditDialog} fullWidth maxWidth="sm">
+      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center' }}>
           <Edit sx={{ mr: 1 }} color="primary" fontSize="small" />
-          Rediger ansatt
+          {editMode ? 'Rediger ansatt' : 'Legg til ny ansatt'}
+          <IconButton
+            aria-label="close"
+            onClick={handleCloseDialog}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            <Close />
+          </IconButton>
         </DialogTitle>
-        <DialogContent>
-          <MuiGrid container spacing={2} sx={{ mt: 1 }}>
-            <MuiGrid item xs={12}>
-              <TextField
-                label="Navn"
-                fullWidth
-                value={editingEmployee?.name || ""}
-                onChange={(e) =>
-                  setEditingEmployee({ ...editingEmployee, name: e.target.value })
-                }
-                size="small"
-              />
+        <form onSubmit={handleSaveEmployee}>
+          <DialogContent dividers>
+            <MuiGrid container spacing={2}>
+              <MuiGrid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Navn"
+                  name="name"
+                  value={newEmployee.name}
+                  onChange={handleInputChange}
+                  required
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Email"
+                  name="email"
+                  type="email"
+                  value={newEmployee.email}
+                  onChange={handleInputChange}
+                  required
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Agent ID"
+                  name="agent_id"
+                  value={newEmployee.agent_id}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Stilling"
+                  name="position"
+                  value={newEmployee.position}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Kontor</InputLabel>
+                  <Select
+                    label="Kontor"
+                    name="agent_company"
+                    value={userRole === 'manager' ? userOffice : newEmployee.agent_company}
+                    onChange={handleInputChange}
+                    required
+                    disabled={userRole === 'manager'}
+                  >
+                    {departments.length > 0 ? (
+                      departments.map(dept => (
+                        <MenuItem key={dept} value={dept}>
+                          {dept}
+                        </MenuItem>
+                      ))
+                    ) : (
+                      <MenuItem value="" disabled>
+                        Ingen kontorer funnet
+                      </MenuItem>
+                    )}
+                    {userRole === 'admin' && (
+                      <MenuItem value="new_department">
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Add fontSize="small" sx={{ mr: 1 }} />
+                          Angi nytt kontor
+                        </Box>
+                      </MenuItem>
+                    )}
+                  </Select>
+                </FormControl>
+                {userRole === 'admin' && newEmployee.agent_company === 'new_department' && (
+                  <TextField
+                    fullWidth
+                    label="Nytt kontor"
+                    value={newEmployee.new_agent_company || ''}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      new_agent_company: e.target.value
+                    })}
+                    size="small"
+                    margin="dense"
+                    required
+                  />
+                )}
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Lønnstrinn</InputLabel>
+                  <Select
+                    label="Lønnstrinn"
+                    name="salary_model_id"
+                    value={newEmployee.salary_model_id}
+                    onChange={handleInputChange}
+                  >
+                    <MenuItem value="">Ikke angitt</MenuItem>
+                    {salaryModels.map(model => (
+                      <MenuItem key={model.id} value={model.id}>
+                        {model.name}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              {/* Only show role selector for admins */}
+              {userRole === 'admin' && (
+                <MuiGrid item xs={12}>
+                  <FormControl fullWidth size="small">
+                    <InputLabel>Rolle</InputLabel>
+                    <Select
+                      label="Rolle"
+                      name="role"
+                      value={newEmployee.role}
+                      onChange={handleInputChange}
+                    >
+                      <MenuItem value="user">Bruker</MenuItem>
+                      <MenuItem value="manager">Kontorleder</MenuItem>
+                      <MenuItem value="admin">Administrator</MenuItem>
+                    </Select>
+                  </FormControl>
+                </MuiGrid>
+              )}
+              
+              {userRole === 'manager' && !editMode && (
+                <MuiGrid item xs={12}>
+                  <Alert severity="info">
+                    Nye ansatte får automatisk brukerrollen 'user'. Bare administratorer kan endre brukerroller.
+                  </Alert>
+                </MuiGrid>
+              )}
             </MuiGrid>
-            <MuiGrid item xs={12} sm={6}>
-              <TextField
-                label="Agent ID"
-                fullWidth
-                value={editingEmployee?.agent_id || ""}
-                onChange={(e) =>
-                  setEditingEmployee({ ...editingEmployee, agent_id: e.target.value })
-                }
-                size="small"
-              />
-            </MuiGrid>
-            <MuiGrid item xs={12} sm={6}>
-              <TextField
-                label="Avdeling"
-                fullWidth
-                value={editingEmployee?.agent_company || ""}
-                onChange={(e) =>
-                  setEditingEmployee({ ...editingEmployee, agent_company: e.target.value })
-                }
-                size="small"
-              />
-            </MuiGrid>
-            <MuiGrid item xs={12}>
-              <TextField
-                label="Stilling"
-                fullWidth
-                value={editingEmployee?.position || ""}
-                onChange={(e) =>
-                  setEditingEmployee({ ...editingEmployee, position: e.target.value })
-                }
-                size="small"
-              />
-            </MuiGrid>
-            <MuiGrid item xs={12} sm={6}>
-              <TextField
-                label="Startdato"
-                type="date"
-                InputLabelProps={{ shrink: true }}
-                fullWidth
-                value={editingEmployee?.start_date || ""}
-                onChange={(e) =>
-                  setEditingEmployee({ ...editingEmployee, start_date: e.target.value })
-                }
-                size="small"
-              />
-            </MuiGrid>
-            <MuiGrid item xs={12} sm={6}>
-              <TextField
-                select
-                label="Velg lønnstrinn"
-                fullWidth
-                value={editingEmployee?.salary_model_id || ""}
-                onChange={(e) =>
-                  setEditingEmployee({
-                    ...editingEmployee,
-                    salary_model_id: Number(e.target.value),
-                  })
-                }
-                size="small"
-              >
-                <MenuItem value="">Ingen lønnstrinn</MenuItem>
-                {salaryModels.map((model) => (
-                  <MenuItem key={model.id} value={model.id}>
-                    {model.name}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </MuiGrid>
-          </MuiGrid>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={handleCloseEditDialog} 
-            startIcon={<Cancel />}
-            size="small"
-          >
-            Avbryt
-          </Button>
-          <Button 
-            onClick={handleUpdateEmployee} 
-            variant="contained" 
-            startIcon={<Save />}
-            size="small"
-          >
-            Lagre endringer
-          </Button>
-        </DialogActions>
+          </DialogContent>
+          <DialogActions>
+            <Button 
+              onClick={handleCloseDialog}
+              startIcon={<Cancel />}
+              size="small"
+            >
+              Avbryt
+            </Button>
+            <Button 
+              type="submit"
+              variant="contained"
+              color="primary"
+              startIcon={<Save />}
+              size="small"
+              disabled={loading}
+            >
+              {editMode ? 'Lagre endringer' : 'Legg til'}
+            </Button>
+          </DialogActions>
+        </form>
       </Dialog>
     </Box>
   );

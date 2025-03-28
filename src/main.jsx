@@ -12,6 +12,7 @@ import AccountingExport from './AccountingExport'; // Import the new component
 import UserAdmin from './UserAdmin'; // Uncomment this line
 import AgentDashboard from './AgentDashboard'; // Import the new component
 import Login from './components/Login';
+import OfficeManagerDashboard from './OfficeManagerDashboard'; // Add this import
 import './index.css';
 
 // Error boundary component to catch rendering errors
@@ -110,10 +111,14 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
         console.log("ProtectedRoute - Allowed roles:", allowedRoles);
         
         // Check multiple possible metadata fields for role
-        const metadataRole = user.user_metadata?.role || 
-                             user.user_metadata?.is_admin === true ? 'admin' : 
-                             user.user_metadata?.is_super_admin === true ? 'admin' : null;
-        
+        let metadataRole = null;
+
+        if (user.user_metadata?.is_super_admin === true || user.user_metadata?.is_admin === true) {
+          metadataRole = 'admin';
+        } else if (user.user_metadata?.role) {
+          metadataRole = user.user_metadata.role;
+        }
+
         if (metadataRole) {
           console.log(`ProtectedRoute - Found role in metadata or admin flags: ${metadataRole}`);
           
@@ -125,9 +130,11 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
             return;
           } else {
             console.log(`ProtectedRoute - User role ${metadataRole} not in allowed roles`);
-            // User doesn't have permission - redirect to appropriate dashboard
-            if (metadataRole === 'admin' || metadataRole === 'manager') {
+            // User doesn't have permission - redirect to appropriate dashboard based on their role
+            if (metadataRole === 'admin') {
               navigate('/sales-dashboard');
+            } else if (metadataRole === 'manager') {
+              navigate('/office-dashboard');
             } else {
               navigate('/agent-dashboard');
             }
@@ -162,9 +169,11 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
           setAuthorized(true);
         } else {
           console.log(`ProtectedRoute - User role ${effectiveRole} not in allowed roles`);
-          // User doesn't have permission - redirect
-          if (effectiveRole === 'admin' || effectiveRole === 'manager') {
+          // User doesn't have permission - redirect based on role
+          if (effectiveRole === 'admin') {
             navigate('/sales-dashboard');
+          } else if (effectiveRole === 'manager') {
+            navigate('/office-dashboard');
           } else {
             navigate('/agent-dashboard');
           }
@@ -268,7 +277,7 @@ const App = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Navigate to="/sales-dashboard" />} />
         <Route path="/employees" element={
-          <ProtectedRoute allowedRoles={['admin']}>
+          <ProtectedRoute allowedRoles={['admin', 'manager']}>
             <Employees />
           </ProtectedRoute>
         } />
@@ -278,17 +287,17 @@ const App = () => {
           </ProtectedRoute>
         } />
         <Route path="/sales-data" element={
-          <ProtectedRoute allowedRoles={['admin', 'manager']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <SalesData />
           </ProtectedRoute>
         } />
         <Route path="/salary-deductions" element={
-          <ProtectedRoute allowedRoles={['admin', 'manager']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <SalaryDeductionsUpload />
           </ProtectedRoute>
         } />
         <Route path="/sales-dashboard" element={
-          <ProtectedRoute allowedRoles={['admin', 'manager']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <SalesDataDashboard />
           </ProtectedRoute>
         } />
@@ -303,8 +312,14 @@ const App = () => {
           </ProtectedRoute>
         } />
         <Route path="/agent-dashboard" element={
-          <ProtectedRoute allowedRoles={['admin', 'manager', 'user']}>
+          <ProtectedRoute allowedRoles={['user', 'manager', 'admin']}>
             <AgentDashboard />
+          </ProtectedRoute>
+        } />
+        {/* Add the new route for office manager dashboard */}
+        <Route path="/office-dashboard" element={
+          <ProtectedRoute allowedRoles={['manager']}>
+            <OfficeManagerDashboard />
           </ProtectedRoute>
         } />
       </Routes>

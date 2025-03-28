@@ -57,15 +57,19 @@ async function debugSupabaseSession() {
         console.log('User metadata:', user.user_metadata);
         
         // Check multiple fields that could indicate role
-        const metadataRole = user.user_metadata?.role;
-        const isAdmin = user.user_metadata?.is_admin === true;
-        const isSuperAdmin = user.user_metadata?.is_super_admin === true;
-        
+        let metadataRole = null;
+
+        if (user.user_metadata?.is_super_admin === true || user.user_metadata?.is_admin === true) {
+          metadataRole = 'admin';
+        } else if (user.user_metadata?.role) {
+          metadataRole = user.user_metadata.role;
+        }
+
         console.log('Role fields in metadata:', {
-          explicitRole: metadataRole,
-          isAdmin: isAdmin,
-          isSuperAdmin: isSuperAdmin,
-          derivedRole: metadataRole || (isAdmin ? 'admin' : null) || (isSuperAdmin ? 'admin' : null) || 'user'
+          explicitRole: user.user_metadata?.role,
+          isAdmin: user.user_metadata?.is_admin === true,
+          isSuperAdmin: user.user_metadata?.is_super_admin === true,
+          derivedRole: metadataRole || 'user'
         });
         
         console.log('User email:', user.email);

@@ -30,6 +30,10 @@ import {
   FormControlLabel,
   Switch,
   InputAdornment,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
   CloudDownload,
@@ -45,6 +49,9 @@ import {
   PriceCheck,
   Download,
   Summarize,
+  CheckCircle,
+  Cancel,
+  Comment,
 } from "@mui/icons-material";
 import { useTheme } from '@mui/material/styles';
 import NavigationMenu from "./components/NavigationMenu";
@@ -63,8 +70,14 @@ function AccountingExport() {
   const [includeDeductions, setIncludeDeductions] = useState(true);
   const [includeCommissions, setIncludeCommissions] = useState(true);
   const [includeBaseSalary, setIncludeBaseSalary] = useState(true);
+  const [approvedOnly, setApprovedOnly] = useState(true); // Default to show only approved commissions
+  const [showApprovalDetails, setShowApprovalDetails] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [revocationDialogOpen, setRevocationDialogOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [revocationReason, setRevocationReason] = useState('');
+  const [revocationLoading, setRevocationLoading] = useState(false);
 
   // Initialize with current month
   useEffect(() => {
@@ -85,23 +98,33 @@ function AccountingExport() {
         { data: employeesData, error: employeesError },
         { data: salaryModelsData, error: salaryModelsError },
         { data: deductionsData, error: deductionsError },
-        { data: salesData, error: salesError }
+        { data: salesData, error: salesError },
+        { data: monthlyApprovals, error: approvalsError }
       ] = await Promise.all([
         supabase.from("employees").select("*"),
         supabase.from("salary_models").select("*"),
         supabase.from("salary_deductions").select("*"),
-        supabase.from("sales_data").select("*")
+        supabase.from("sales_data").select("*"),
+        supabase.from("monthly_commission_approvals").select("*")
       ]);
       
       if (employeesError) throw new Error(`Failed to fetch employees: ${employeesError.message}`);
       if (salaryModelsError) throw new Error(`Failed to fetch salary models: ${salaryModelsError.message}`);
       if (deductionsError) throw new Error(`Failed to fetch deductions: ${deductionsError.message}`);
       if (salesError) throw new Error(`Failed to fetch sales data: ${salesError.message}`);
+      if (approvalsError) throw new Error(`Failed to fetch approval data: ${approvalsError.message}`);
       
       setEmployees(employeesData);
       setSalaryModels(salaryModelsData);
       setDeductions(deductionsData);
       setSalesData(salesData);
+      
+      // Store monthly approvals for later reference
+      const approvalsByAgentAndMonth = {};
+      monthlyApprovals.forEach(approval => {
+        const key = `${approval.agent_name}:${approval.month_year}`;
+        approvalsByAgentAndMonth[key] = approval;
+      });
       
       // Extract available months from sales data
       const months = new Set();
@@ -124,8 +147,8 @@ function AccountingExport() {
         setSelectedMonth(sortedMonths[0]);
       }
       
-      // Process payroll data
-      processPayrollData(employeesData, salaryModelsData, deductionsData, salesData);
+      // Process payroll data with approvals
+      processPayrollData(employeesData, salaryModelsData, deductionsData, salesData, approvalsByAgentAndMonth);
       
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -136,13 +159,22 @@ function AccountingExport() {
   };
 
   // Process all data to create payroll records
-  const processPayrollData = (employees, salaryModels, deductions, salesData) => {
+  const processPayrollData = (employees, salaryModels, deductions, salesData, approvals) => {
     if (!selectedMonth) return;
     
     const payrollRecords = [];
     
     // Process each employee
     employees.forEach(employee => {
+      // Check if employee has approved commission for this month
+      const approvalKey = `${employee.name}:${selectedMonth}`;
+      const approvalRecord = approvals[approvalKey];
+      
+      // Skip if we're showing only approved records and this employee has no approval
+      if (approvedOnly && (!approvalRecord || !approvalRecord.approved || approvalRecord.revoked)) {
+        return;
+      }
+      
       // Find employee's salary model
       const salaryModel = salaryModels.find(model => parseInt(model.id) === parseInt(employee.salary_model_id));
       
@@ -183,20 +215,35 @@ function AccountingExport() {
         }
       });
       
-      // Calculate commissions
-      const salesDataForCalc = {  // Renamed from salesData to avoid variable shadowing
-        agent_name: employee.name,
-        agent_id: employee.agent_id,
-        salary_level: employee.salary_model_id,
-        livPremium,
-        skadePremium,
-        totalPremium: livPremium + skadePremium,
-        livCount,
-        skadeCount,
-        totalCount: livCount + skadeCount
-      };
+      // Calculate commissions - either from approval or calculated
+      let commission;
+      let commissionSource;
       
-      const commission = calculateCommission(salesDataForCalc, salaryModels);
+      if (approvalRecord && approvalRecord.approved && !approvalRecord.revoked) {
+        // Use the approved commission amount
+        commission = {
+          livCommission: 0, // We don't have this breakdown in approval
+          skadeCommission: 0, // We don't have this breakdown in approval
+          totalCommission: parseFloat(approvalRecord.approved_commission) || 0
+        };
+        commissionSource = 'approved';
+      } else {
+        // Calculate based on salary model
+        const salesDataForCalc = {
+          agent_name: employee.name,
+          agent_id: employee.agent_id,
+          salary_level: employee.salary_model_id,
+          livPremium,
+          skadePremium,
+          totalPremium: livPremium + skadePremium,
+          livCount,
+          skadeCount,
+          totalCount: livCount + skadeCount
+        };
+        
+        commission = calculateCommission(salesDataForCalc, salaryModels);
+        commissionSource = 'calculated';
+      }
       
       // Get employee's deductions
       const employeeDeductions = deductions.filter(deduction => 
@@ -239,7 +286,9 @@ function AccountingExport() {
           amount: parseFloat(d.amount) || 0,
           type: d.type,
           isRecurring: d.is_recurring
-        }))
+        })),
+        approvalInfo: approvalRecord || null,
+        commissionSource,
       });
     });
     
@@ -285,6 +334,9 @@ function AccountingExport() {
   // Filter payroll data based on selections
   const filteredPayrollData = payrollData.filter(record => {
     if (selectedEmployee && record.employeeName !== selectedEmployee && record.employeeId !== selectedEmployee) {
+      return false;
+    }
+    if (approvedOnly && (!record.approvalInfo || !record.approvalInfo.approved || record.approvalInfo.revoked)) {
       return false;
     }
     return true;
@@ -478,6 +530,70 @@ function AccountingExport() {
     }
   };
 
+  // Function to open revocation dialog
+  const openRevocationDialog = (record) => {
+    setSelectedRecord(record);
+    setRevocationReason('');
+    setRevocationDialogOpen(true);
+  };
+  
+  // Function to close revocation dialog
+  const closeRevocationDialog = () => {
+    setRevocationDialogOpen(false);
+    setSelectedRecord(null);
+    setRevocationReason('');
+  };
+  
+  // Function to handle approval revocation
+  const handleRevokeApproval = async () => {
+    if (!selectedRecord || !revocationReason) return;
+    
+    setRevocationLoading(true);
+    setError(null);
+    
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const currentUser = sessionData?.session?.user;
+      
+      if (!currentUser) {
+        throw new Error("Kunne ikke hente brukerdata. Logg inn på nytt.");
+      }
+      
+      // Call the revocation RPC
+      const { data, error } = await supabase.rpc(
+        'revoke_monthly_sales_approval',
+        {
+          target_agent: selectedRecord.employeeName,
+          target_month: selectedRecord.month,
+          revoked_by: currentUser.email,
+          revocation_reason: revocationReason
+        }
+      );
+      
+      if (error) throw error;
+      
+      console.log(`Revoked approval for ${selectedRecord.employeeName}, affected ${data} records`);
+      
+      setSuccess(`Godkjenning for ${selectedRecord.employeeName} ble trukket tilbake`);
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setSuccess(null);
+      }, 3000);
+      
+      // Refresh data
+      await fetchData();
+      
+      closeRevocationDialog();
+      
+    } catch (error) {
+      console.error("Error revoking approval:", error);
+      setError(`Feil ved tilbaketrekking av godkjenning: ${error.message}`);
+    } finally {
+      setRevocationLoading(false);
+    }
+  };
+
   return (
     <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
       <NavigationMenu />
@@ -512,7 +628,7 @@ function AccountingExport() {
         
         {/* Filter and options */}
         <Grid container spacing={3}>
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={3}>
             <FormControl fullWidth size="small">
               <InputLabel>Velg måned</InputLabel>
               <Select
@@ -534,7 +650,7 @@ function AccountingExport() {
             </FormControl>
           </Grid>
           
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={3}>
             <FormControl fullWidth size="small">
               <InputLabel>Velg ansatt</InputLabel>
               <Select
@@ -557,7 +673,20 @@ function AccountingExport() {
             </FormControl>
           </Grid>
           
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={3}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={approvedOnly}
+                  onChange={(e) => setApprovedOnly(e.target.checked)}
+                  color="primary"
+                />
+              }
+              label="Vis kun godkjente provisjoner"
+            />
+          </Grid>
+          
+          <Grid item xs={12} md={3}>
             <Button
               fullWidth
               variant="contained"
@@ -643,10 +772,26 @@ function AccountingExport() {
       
       {/* Data preview */}
       <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
-        <Typography variant="h6" fontWeight="bold" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
-          <Receipt sx={{ mr: 1 }} color="primary" />
-          Lønningsdata {selectedMonth ? `(${selectedMonth})` : ""}
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center' }}>
+            <Receipt sx={{ mr: 1 }} color="primary" />
+            Lønningsdata {selectedMonth ? `(${selectedMonth})` : ""}
+          </Typography>
+          
+          <Box>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={showApprovalDetails}
+                  onChange={(e) => setShowApprovalDetails(e.target.checked)}
+                  color="primary"
+                  size="small"
+                />
+              }
+              label="Vis godkjenningsdetaljer"
+            />
+          </Box>
+        </Box>
         
         {loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -654,7 +799,9 @@ function AccountingExport() {
           </Box>
         ) : filteredPayrollData.length === 0 ? (
           <Alert severity="info">
-            Ingen lønningsdata funnet for valgt periode.
+            {approvedOnly 
+              ? 'Ingen godkjente lønningsdata funnet for valgt periode. Prøv å fjerne "Vis kun godkjente provisjoner" filteret.'
+              : 'Ingen lønningsdata funnet for valgt periode.'}
           </Alert>
         ) : (
           <TableContainer sx={{ maxHeight: '60vh' }}>
@@ -667,10 +814,11 @@ function AccountingExport() {
                   <TableCell align="right">Grunnlønn</TableCell>
                   <TableCell align="right">Premium (Liv)</TableCell>
                   <TableCell align="right">Premium (Skade)</TableCell>
-                  <TableCell align="right">Provisjon (Liv)</TableCell>
-                  <TableCell align="right">Provisjon (Skade)</TableCell>
+                  <TableCell align="right">Provisjon</TableCell>
+                  {showApprovalDetails && <TableCell>Godkjent av</TableCell>}
                   <TableCell align="right">Trekk</TableCell>
                   <TableCell align="right">Netto Lønn</TableCell>
+                  <TableCell>Handlinger</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -695,17 +843,82 @@ function AccountingExport() {
                     <TableCell align="right">
                       {record.skadePremium.toLocaleString('nb-NO')} kr
                     </TableCell>
-                    <TableCell align="right">
-                      {record.livCommission.toLocaleString('nb-NO')} kr
+                    <TableCell align="right" sx={{ position: 'relative' }}>
+                      <Box sx={{ 
+                        display: 'flex', 
+                        alignItems: 'center',
+                        justifyContent: 'flex-end',
+                        gap: 0.5
+                      }}>
+                        {record.totalCommission.toLocaleString('nb-NO')} kr
+                        {record.commissionSource === 'approved' && (
+                          <Tooltip title="Godkjent provisjon">
+                            <CheckCircle color="success" fontSize="small" />
+                          </Tooltip>
+                        )}
+                      </Box>
+                      {record.commissionSource === 'approved' && 
+                       record.approvalInfo?.approval_comment && (
+                        <Tooltip title={record.approvalInfo.approval_comment}>
+                          <Box sx={{ 
+                            position: 'absolute',
+                            bottom: -3,
+                            right: 0,
+                            fontSize: '0.7rem',
+                            color: 'text.secondary',
+                            fontStyle: 'italic'
+                          }}>
+                            Justert
+                          </Box>
+                        </Tooltip>
+                      )}
                     </TableCell>
-                    <TableCell align="right">
-                      {record.skadeCommission.toLocaleString('nb-NO')} kr
-                    </TableCell>
+                    {showApprovalDetails && (
+                      <TableCell>
+                        {record.approvalInfo?.approved_by ? (
+                          <Box>
+                            <Tooltip title={`Godkjent: ${new Date(record.approvalInfo.approved_at).toLocaleString('nb-NO')}`}>
+                              <Chip
+                                size="small"
+                                label={record.approvalInfo.approved_by.split('@')[0]}
+                                color="success"
+                                variant="outlined"
+                              />
+                            </Tooltip>
+                            {record.approvalInfo.approval_comment && (
+                              <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                                "{record.approvalInfo.approval_comment}"
+                              </Typography>
+                            )}
+                          </Box>
+                        ) : (
+                          <Chip
+                            size="small"
+                            label="Ikke godkjent"
+                            color="default"
+                            variant="outlined"
+                          />
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell align="right" sx={{ color: theme.palette.error.main }}>
                       -{record.deductions.toLocaleString('nb-NO')} kr
                     </TableCell>
                     <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
                       {record.totalSalary.toLocaleString('nb-NO')} kr
+                    </TableCell>
+                    <TableCell>
+                      {record.commissionSource === 'approved' && record.approvalInfo?.approved_by && (
+                        <Tooltip title="Trekk tilbake godkjenning">
+                          <IconButton 
+                            size="small" 
+                            color="error"
+                            onClick={() => openRevocationDialog(record)}
+                          >
+                            <Cancel fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -841,6 +1054,101 @@ function AccountingExport() {
           </Grid>
         </Grid>
       )}
+      
+      {/* Revocation Dialog */}
+      <Dialog 
+        open={revocationDialogOpen} 
+        onClose={closeRevocationDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          Trekk tilbake godkjenning
+        </DialogTitle>
+        <DialogContent>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          
+          {selectedRecord && (
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" fontWeight="bold">
+                  Trekk tilbake godkjenning for {selectedRecord.employeeName}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Måned: {selectedRecord.month?.replace('-', '/')}
+                </Typography>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <AlertTitle>Advarsel</AlertTitle>
+                  Å trekke tilbake godkjenning vil fjerne denne agentens provisjon fra månedlig utbetaling. 
+                  Dette bør kun gjøres hvis godkjenningen var feilaktig eller hvis det har oppstått andre 
+                  grunner til at provisjonen ikke skal utbetales.
+                </Alert>
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Typography variant="body2" color="text.secondary">
+                  Opprinnelig godkjent av: {selectedRecord.approvalInfo?.approved_by || 'Ukjent'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Godkjent beløp: {parseFloat(selectedRecord.approvalInfo?.approved_commission || 0).toLocaleString('nb-NO')} kr
+                </Typography>
+                {selectedRecord.approvalInfo?.approval_comment && (
+                  <Typography variant="body2" color="text.secondary">
+                    Kommentar: {selectedRecord.approvalInfo.approval_comment}
+                  </Typography>
+                )}
+              </Grid>
+              
+              <Grid item xs={12}>
+                <TextField
+                  label="Årsak for tilbaketrekking"
+                  multiline
+                  rows={3}
+                  value={revocationReason}
+                  onChange={(e) => setRevocationReason(e.target.value)}
+                  fullWidth
+                  required
+                  placeholder="Angi årsak for tilbaketrekking av godkjenning"
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <Comment fontSize="small" />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Typography variant="body2" color="error">
+                  Merk: Denne handlingen loggføres og kan ikke angres.
+                </Typography>
+              </Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={closeRevocationDialog} color="inherit" disabled={revocationLoading}>
+            Avbryt
+          </Button>
+          <Button
+            onClick={handleRevokeApproval}
+            variant="contained"
+            color="error"
+            startIcon={<Cancel />}
+            disabled={revocationLoading || !revocationReason}
+          >
+            {revocationLoading ? <CircularProgress size={24} /> : 'Trekk tilbake godkjenning'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

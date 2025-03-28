@@ -8,6 +8,7 @@ import SalesData from './SalesData';
 import SalaryDeductionsUpload from './SalaryDeductionsUpload';
 import SalesDataDashboard from './SalesDataDashboard';
 import Login from './components/Login'; // Import the Login component
+import { OfficeManagerDashboard } from './Manager'; // Import the new Manager component
 import './index.css';
 
 // Protected route component
@@ -86,6 +87,11 @@ function App() {
         <Route path="/sales-dashboard" element={
           <ProtectedRoute>
             <SalesDataDashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/manager-dashboard" element={
+          <ProtectedRoute>
+            <OfficeManagerDashboard />
           </ProtectedRoute>
         } />
       </Routes>

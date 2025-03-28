@@ -18,8 +18,12 @@ import {
   Dashboard, 
   Person, 
   Logout, 
-  Settings, 
-  AccountCircle,
+  Payments,
+  BarChart,
+  MoneyOff,
+  AccountBalance,
+  People,
+  Business,
   KeyboardArrowDown,
   AdminPanelSettings,
 } from '@mui/icons-material';
@@ -35,73 +39,46 @@ function NavigationMenu() {
   const [userMenuAnchor, setUserMenuAnchor] = useState(null);
   
   useEffect(() => {
-    // Check current user's role
-    const checkUserRole = async () => {
+    const fetchUserRole = async () => {
       try {
-        // Get user session
         const session = await supabase.auth.getSession();
+        const user = session.data?.session?.user;
         
-        console.log("Full session data:", session);
+        if (!user) return;
         
-        if (!session?.data?.session) {
-          console.error('No active session found');
-          return;
+        // First check in user metadata (from auth)
+        let role = 'user';
+        if (user.user_metadata?.is_super_admin === true || user.user_metadata?.is_admin === true) {
+          role = 'admin';
+        } else if (user.user_metadata?.role) {
+          role = user.user_metadata.role;
         }
         
-        const user = session.data.session.user;
-        console.log("User from session:", user);
-        
-        if (user) {
-          // Check multiple possible metadata fields for role
-          // This covers both user_metadata.role and other potential fields
-          const metadataRole = user.user_metadata?.role || 
-                               user.user_metadata?.is_admin === true ? 'admin' : 
-                               user.user_metadata?.is_super_admin === true ? 'admin' : null;
-          
-          if (metadataRole) {
-            console.log("Role from metadata or admin flags:", metadataRole);
-            setUserRole(metadataRole);
-            setUserName(user.user_metadata?.name || user.email);
-            return;
-          }
-          
-          // Fallback to database
-          console.log("No role in metadata, checking database...");
-          const { data: userData, error: userError } = await supabase
-            .from('users')
-            .select('*')
+        // If no role in metadata, check in employees table
+        if (role === 'user') {
+          const { data: employeeData, error } = await supabase
+            .from('employees')
+            .select('role')
             .eq('email', user.email)
             .single();
-          
-          console.log("DB user data:", userData, "Error:", userError);
-              
-          if (!userError && userData) {
-            setUserRole(userData.role || 'user');
-            setUserName(userData.name || user.email);
-          } else {
-            // Try to find by email in employees table (just for the name)
-            const { data: employeeData } = await supabase
-              .from('employees')
-              .select('name, email')
-              .eq('email', user.email)
-              .single();
-                
-            if (employeeData) {
-              setUserName(employeeData.name);
-              setUserRole('user');
-            } else {
-              // Last resort - use email username part
-              setUserName(user.email.split('@')[0]);
-              setUserRole('user');
-            }
+            
+          if (!error && employeeData?.role) {
+            role = employeeData.role;
           }
         }
-      } catch (error) {
-        console.error('Error checking user role:', error);
+        
+        console.log("User role determined:", role);
+        setUserRole(role);
+        
+        // Also get the user's name
+        const displayName = user.user_metadata?.name || user.email.split('@')[0];
+        setUserName(displayName);
+      } catch (err) {
+        console.error("Error fetching user role:", err);
       }
     };
     
-    checkUserRole();
+    fetchUserRole();
   }, []);
   
   // Handle user menu
@@ -115,31 +92,39 @@ function NavigationMenu() {
   
   const handleLogout = async () => {
     handleCloseUserMenu();
-    await supabase.auth.signOut();
-    navigate('/login');
+    try {
+      await supabase.auth.signOut();
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
   };
   
   // Define navigation items for different roles
   const adminNavItems = [
-    { path: '/sales-dashboard', label: 'Dashboard', roles: ['admin', 'manager'] },
-    { path: '/employees', label: 'Ansatte', roles: ['admin'] },
-    { path: '/salary-models', label: 'Lønnstrinn', roles: ['admin'] },
-    { path: '/salary-deductions', label: 'Lønnstrekk', roles: ['admin', 'manager'] },
-    { path: '/sales-data', label: 'Salgsdata', roles: ['admin', 'manager'] },
-    { path: '/accounting-export', label: 'Regnskapseksport', roles: ['admin', 'manager'] },
-    { path: '/user-admin', label: 'Brukere', roles: ['admin'] },
+    { path: '/sales-dashboard', label: 'Dashboard', icon: <Dashboard /> },
+    { path: '/employees', label: 'Ansatte', icon: <People /> },
+    { path: '/salary-models', label: 'Lønnstrinn', icon: <Payments /> },
+    { path: '/sales-data', label: 'Salgsdata', icon: <BarChart /> },
+    { path: '/salary-deductions', label: 'Lønnstrekk', icon: <MoneyOff /> },
+    { path: '/accounting-export', label: 'Regnskapseksport', icon: <AccountBalance /> },
+  ];
+  
+  // Limited menu items for managers (kontorleder) - removed the accounting-export (Godkjenninger) item
+  const managerNavItems = [
+    { path: '/office-dashboard', label: 'Kontoroversikt', icon: <Business /> },
+    { path: '/employees', label: 'Kontoransatte', icon: <People /> },
   ];
   
   const userNavItems = [
-    { path: '/agent-dashboard', label: 'Min Oversikt', roles: ['user', 'manager'] }, // Remove 'admin' from roles array
+    { path: '/agent-dashboard', label: 'Min Oversikt', icon: <Person /> }
   ];
   
-  // Select navigation items based on role and permissions
-  const navItems = userRole === 'admin' ? 
-    [...adminNavItems] : // For admins, show only admin items
-    userRole === 'manager' ?
-      [...adminNavItems.filter(item => item.roles.includes('manager')), ...userNavItems] : // For managers, show allowed admin items and user items
-      userNavItems; // For regular users, show only user items
+  // Determine navigation items based on user role
+  const navItems = 
+    userRole === 'admin' ? adminNavItems : 
+    userRole === 'manager' ? managerNavItems : 
+    userNavItems;
 
   return (
     <Box sx={{ mb: 4 }}>
@@ -155,7 +140,7 @@ function NavigationMenu() {
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Dashboard color="primary" sx={{ mr: 1, fontSize: 28 }} />
           <Typography variant="h5" fontWeight="bold" color="primary">
-            Lønnssystem
+            SalesPayroll
           </Typography>
         </Box>
         
@@ -197,6 +182,8 @@ function NavigationMenu() {
                 <ListItemIcon>
                   {userRole === 'admin' ? 
                     <AdminPanelSettings fontSize="small" color="error" /> : 
+                    userRole === 'manager' ?
+                    <Business fontSize="small" color="warning" /> :
                     <Person fontSize="small" color="primary" />
                   }
                 </ListItemIcon>
@@ -204,7 +191,7 @@ function NavigationMenu() {
                   primary={
                     <Typography variant="body2">
                       {userRole === 'admin' ? 'Administrator' : 
-                       userRole === 'manager' ? 'Manager' : 'Bruker'}
+                       userRole === 'manager' ? 'Kontorleder' : 'Bruker'}
                     </Typography>
                   }
                 />
@@ -232,6 +219,7 @@ function NavigationMenu() {
               variant={currentPath === item.path ? "contained" : "outlined"}
               size="small"
               disableElevation={currentPath === item.path}
+              startIcon={item.icon}
               sx={{
                 borderRadius: '20px',
                 textTransform: 'none',
