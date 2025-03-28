@@ -31,3 +31,14 @@ body {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+body {
+  margin: 0;
+  padding: 0;
+  /* Eventuelt andre nullstillinger */
+  box-sizing: border-box;
+}
+
+*, *::before, *::after {
+   box-sizing: inherit;
+}

@@ -76,7 +76,27 @@ export const useApprovalFunctions = ({
       console.log("Approved agents to mark or filter out:", approvedAgentNames);
       
       if (agentPerformance.length > 0) {
-        const updatedAgentPerformance = agentPerformance.map(agent => {
+        const missingAgents = [];
+        approvalData?.forEach(approval => {
+          if (approval.approved && !approval.revoked && 
+              !agentPerformance.some(agent => agent.name === approval.agent_name)) {
+            console.log(`Found approved agent ${approval.agent_name} not in agentPerformance, will add`);
+            missingAgents.push({
+              name: approval.agent_name,
+              approvalRecord: approval,
+              isApproved: true,
+              commission: parseFloat(approval.approved_commission) || 0,
+              totalPremium: 0,
+              livPremium: 0,
+              skadePremium: 0,
+              salaryModelName: 'Ukjent',
+              totalCount: 0,
+              ranking: agentPerformance.length + missingAgents.length + 1
+            });
+          }
+        });
+
+        let updatedAgentPerformance = agentPerformance.map(agent => {
           const record = approvalData?.find(
             a => a.agent_name === agent.name && a.revoked !== true
           );
@@ -89,6 +109,11 @@ export const useApprovalFunctions = ({
             isApproved
           };
         });
+        
+        if (missingAgents.length > 0) {
+          console.log(`Adding ${missingAgents.length} missing approved agents to the display`);
+          updatedAgentPerformance = [...updatedAgentPerformance, ...missingAgents];
+        }
         
         if (tabValue === 3 && !showApproved) {
           setAgentPerformance(updatedAgentPerformance.filter(agent => !approvedAgentNames.includes(agent.name)));
@@ -363,6 +388,28 @@ export const useApprovalFunctions = ({
         throw new Error("Kunne ikke hente brukerdata. Logg inn på nytt.");
       }
       
+      // First, get the specific record to update
+      const { data: approvalToRevoke, error: findError } = await supabase
+        .from('monthly_commission_approvals')
+        .select('id')
+        .eq('agent_name', selectedAgent.name)
+        .eq('month_year', selectedMonth)
+        .eq('agent_company', managerData.agent_company)
+        .eq('approved', true)
+        .eq('revoked', false)
+        .maybeSingle();
+      
+      if (findError) {
+        throw new Error(`Kunne ikke finne godkjenning: ${findError.message}`);
+      }
+      
+      if (!approvalToRevoke) {
+        throw new Error(`Ingen aktiv godkjenning funnet for ${selectedAgent.name}`);
+      }
+      
+      console.log(`Found approval to revoke:`, approvalToRevoke);
+      
+      // Now update by ID to avoid ambiguous column references
       const { data, error } = await supabase
         .from('monthly_commission_approvals')
         .update({
@@ -371,20 +418,19 @@ export const useApprovalFunctions = ({
           revoked_at: new Date().toISOString(),
           revocation_reason: revocationReason || 'Godkjenning trukket tilbake'
         })
-        .eq('agent_name', selectedAgent.name)
-        .eq('month_year', selectedMonth)
-        .eq('agent_company', managerData.agent_company)
-        .eq('approved', true)
-        .eq('revoked', false);
+        .eq('id', approvalToRevoke.id)
+        .select();
       
       if (error) throw error;
       
       console.log(`Revoked approval for ${selectedAgent.name}`);
+      
       setApprovalSuccess?.(`Godkjenning for ${selectedAgent.name} ble trukket tilbake`);
       setTimeout(() => setApprovalSuccess?.(null), 3000);
       
       await fetchMonthlyApprovals();
       closeRevocationDialog();
+      
     } catch (error) {
       console.error("Error revoking approval:", error);
       setApprovalError?.(`Feil ved tilbaketrekking av godkjenning: ${error.message}`);

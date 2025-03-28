@@ -559,20 +559,41 @@ function AccountingExport() {
         throw new Error("Kunne ikke hente brukerdata. Logg inn på nytt.");
       }
       
-      // Call the revocation RPC
-      const { data, error } = await supabase.rpc(
-        'revoke_monthly_sales_approval',
-        {
-          target_agent: selectedRecord.employeeName,
-          target_month: selectedRecord.month,
+      // First, get the specific record to update by ID to avoid ambiguous column references
+      const { data: approvalRecord, error: findError } = await supabase
+        .from('monthly_commission_approvals')
+        .select('id')
+        .eq('agent_name', selectedRecord.employeeName)
+        .eq('month_year', selectedRecord.month)
+        .eq('approved', true)
+        .eq('revoked', false)
+        .maybeSingle();
+      
+      if (findError) {
+        throw new Error(`Kunne ikke finne godkjenning: ${findError.message}`);
+      }
+      
+      if (!approvalRecord) {
+        throw new Error(`Ingen aktiv godkjenning funnet for ${selectedRecord.employeeName}`);
+      }
+      
+      console.log(`Found approval to revoke, ID: ${approvalRecord.id}`);
+      
+      // Now update by ID to avoid ambiguous column references
+      const { data, error } = await supabase
+        .from('monthly_commission_approvals')
+        .update({
+          revoked: true,
           revoked_by: currentUser.email,
-          revocation_reason: revocationReason
-        }
-      );
+          revoked_at: new Date().toISOString(),
+          revocation_reason: revocationReason || 'Godkjenning trukket tilbake'
+        })
+        .eq('id', approvalRecord.id)
+        .select();
       
       if (error) throw error;
       
-      console.log(`Revoked approval for ${selectedRecord.employeeName}, affected ${data} records`);
+      console.log(`Revoked approval for ${selectedRecord.employeeName}, affected record:`, data);
       
       setSuccess(`Godkjenning for ${selectedRecord.employeeName} ble trukket tilbake`);
       

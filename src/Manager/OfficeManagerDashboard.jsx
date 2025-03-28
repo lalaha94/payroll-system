@@ -65,12 +65,14 @@ function OfficeManagerDashboard() {
     tabValue
   });
   
-  // Add this useEffect to handle toggling of showApproved
+  // Update this useEffect to handle the new tab structure
   useEffect(() => {
-    if (tabValue === 3 && selectedMonth && managerData) {
+    // Tab 1 is now the Monthly Approvals tab (previously was tab 3)
+    if (tabValue === 1 && selectedMonth && managerData) {
+      console.log("Tab changed to monthly approvals, fetching data...");
       fetchMonthlyApprovals();
     }
-  }, [showApproved]); // Only include showApproved in the dependency array
+  }, [tabValue, selectedMonth, managerData]);
 
   // Dialog handlers
   const openBatchApproval = async (agent) => {
@@ -163,17 +165,6 @@ function OfficeManagerDashboard() {
   return (
     <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
       <NavigationMenu />
-      
-      {process.env.NODE_ENV === 'development' && (
-        <Paper sx={{ p: 2, mb: 2, bgcolor: '#fff8e1' }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>
-            Debug Info:
-          </Typography>
-          <Typography variant="body2">
-            Salary Models Count: {salaryModels.length}
-          </Typography>
-        </Paper>
-      )}
       
       {/* Manager Header Section */}
       <ManagerHeader 
