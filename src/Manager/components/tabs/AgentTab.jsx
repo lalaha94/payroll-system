@@ -396,7 +396,7 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     <Box sx={{ p: 3 }}>
       <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="h6" fontWeight="bold">
-          Agentprestasjoner
+          
         </Typography>
         
         <TextField 

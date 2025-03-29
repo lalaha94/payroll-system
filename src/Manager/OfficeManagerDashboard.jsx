@@ -168,7 +168,7 @@ function OfficeManagerDashboard() {
   }
 
   return (
-    <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
+    <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh", pt: { xs: 10, sm: 11, md: 12 } }}>
       <NavigationMenu />
       
       {/* Manager Header Section */}
@@ -182,7 +182,9 @@ function OfficeManagerDashboard() {
       />
       
       {/* Summary Cards Section */}
-      <SummaryCards officePerformance={officePerformance} />
+      <Box sx={{ mb: 4 }}>  {/* Add margin bottom to create space */}
+        <SummaryCards officePerformance={officePerformance} />
+      </Box>
       
       {/* Tabs Container */}
       <TabsContainer 
