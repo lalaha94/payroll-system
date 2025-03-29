@@ -6,7 +6,7 @@ import Employees from './Employees';
 import SalaryModels from './SalaryModels';
 import SalesData from './SalesData';
 import SalaryDeductionsUpload from './SalaryDeductionsUpload';
-import SalesDataDashboard from './SalesDataDashboard';
+import SalesDataDashboard from './admin'; // Import from admin directory
 import Login from './components/Login'; // Import the Login component
 import { OfficeManagerDashboard } from './Manager'; // Import the new Manager component
 import './index.css';

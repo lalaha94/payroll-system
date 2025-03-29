@@ -19,6 +19,8 @@ const TabsContainer = ({
   tabValue, 
   setTabValue,
   agentPerformance,
+  updateAgentPerformance, // Add this prop
+  salaryModels,
   showApproved,
   setShowApproved,
   selectedMonth,
@@ -44,17 +46,19 @@ const TabsContainer = ({
         textColor="primary"
         sx={{ borderBottom: 1, borderColor: 'divider' }}
       >
-        <Tab icon={<PeopleAlt />} iconPosition="start" label="Agenter" />
+        <Tab icon={<PeopleAlt />} iconPosition="start" label="Rådgivere" />
         <Tab 
           icon={<CheckCircle />} 
           iconPosition="start" 
-          label="Månedsutbetaling" 
+          label="Godkjenn lønn" 
         />
       </Tabs>
 
       {tabValue === 0 && (
         <AgentTab 
           agentPerformance={agentPerformance}
+          updateAgentPerformance={updateAgentPerformance} // Pass the update function
+          salaryModels={salaryModels}
           CHART_COLORS={CHART_COLORS}
         />
       )}

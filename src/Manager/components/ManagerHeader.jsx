@@ -27,8 +27,7 @@ const ManagerHeader = ({
     <>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" fontWeight="bold" gutterBottom>
-          Kontorleder Oversikt
-        </Typography>
+         </Typography>
         <Typography variant="subtitle1" color="text.secondary">
           {managerData.agent_company} - {selectedMonth ? selectedMonth.replace('-', '/') : 'inneværende måned'}
         </Typography>

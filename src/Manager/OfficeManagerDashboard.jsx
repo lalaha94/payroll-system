@@ -65,6 +65,11 @@ function OfficeManagerDashboard() {
     tabValue
   });
   
+  // Create a function to update agent performance
+  const updateAgentPerformance = (updatedAgents) => {
+    setAgentPerformance(updatedAgents);
+  };
+
   // Update this useEffect to handle the new tab structure
   useEffect(() => {
     // Tab 1 is now the Monthly Approvals tab (previously was tab 3)
@@ -184,6 +189,8 @@ function OfficeManagerDashboard() {
         tabValue={tabValue}
         setTabValue={setTabValue}
         agentPerformance={agentPerformance}
+        updateAgentPerformance={updateAgentPerformance}
+        salaryModels={salaryModels} // Add this prop
         showApproved={showApproved}
         setShowApproved={setShowApproved}
         selectedMonth={selectedMonth}

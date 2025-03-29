@@ -47,9 +47,34 @@ import {
   UploadFile,
   Business,
   CloudUpload,
+  ToggleOn,
+  ToggleOff,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import NavigationMenu from './components/NavigationMenu';
+import { format, differenceInMonths } from 'date-fns';
+
+// Fallback functions in case date-fns doesn't load
+const formatDate = (date, formatString) => {
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '';
+  
+  // Simple ISO format YYYY-MM-DD if date-fns format is not available
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const calculateMonthsDiff = (startDate, endDate = new Date()) => {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (isNaN(start.getTime())) return null;
+  
+  const years = end.getFullYear() - start.getFullYear();
+  const months = end.getMonth() - start.getMonth();
+  return years * 12 + months;
+};
 
 function Employees() {
   const theme = useTheme();
@@ -68,7 +93,9 @@ function Employees() {
     position: '',
     salary_model_id: '',
     role: 'user',
-    new_agent_company: ''
+    new_agent_company: '',
+    hire_date: (format ? format(new Date(), 'yyyy-MM-dd') : formatDate(new Date())),
+    apply_five_percent_deduction: true,
   });
   const [editMode, setEditMode] = useState(false);
   const [userRole, setUserRole] = useState('user');
@@ -136,7 +163,22 @@ function Employees() {
       
       if (error) throw error;
       
-      setEmployees(data || []);
+      const enrichedEmployees = data.map(emp => {
+        if (!emp.hire_date) return { ...emp, apply_five_percent_deduction: emp.apply_five_percent_deduction ?? true };
+        
+        const hireDate = new Date(emp.hire_date);
+        const monthsEmployed = differenceInMonths ? 
+          differenceInMonths(new Date(), hireDate) : 
+          calculateMonthsDiff(hireDate);
+        
+        const deductionValue = emp.apply_five_percent_deduction !== null
+          ? emp.apply_five_percent_deduction
+          : monthsEmployed < 9;
+          
+        return { ...emp, apply_five_percent_deduction: deductionValue };
+      });
+      
+      setEmployees(enrichedEmployees);
 
       // Extract unique departments (agent_company values)
       const uniqueDepartments = Array.from(
@@ -178,7 +220,9 @@ function Employees() {
         position: employee.position || '',
         salary_model_id: employee.salary_model_id || '',
         role: employee.role || 'user',
-        new_agent_company: ''
+        new_agent_company: '',
+        hire_date: employee.hire_date || (format ? format(new Date(), 'yyyy-MM-dd') : formatDate(new Date())),
+        apply_five_percent_deduction: employee.apply_five_percent_deduction ?? true,
       });
       setEditMode(true);
     } else {
@@ -190,7 +234,9 @@ function Employees() {
         position: 'Rådgiver', // Default position
         salary_model_id: '',
         role: 'user',
-        new_agent_company: ''
+        new_agent_company: '',
+        hire_date: (format ? format(new Date(), 'yyyy-MM-dd') : formatDate(new Date())),
+        apply_five_percent_deduction: true,
       });
       setEditMode(false);
     }
@@ -203,10 +249,10 @@ function Employees() {
   };
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setNewEmployee({
       ...newEmployee,
-      [name]: value,
+      [name]: type === 'checkbox' ? checked : value,
     });
   };
 
@@ -313,6 +359,23 @@ function Employees() {
       setUploadError('Failed to save employee: ' + error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const toggleDeduction = async (id, currentValue) => {
+    try {
+      const { error } = await supabase
+        .from('employees')
+        .update({ apply_five_percent_deduction: !currentValue })
+        .eq('id', id);
+      
+      if (error) throw error;
+      
+      setEmployees(employees.map(emp => 
+        emp.id === id ? { ...emp, apply_five_percent_deduction: !currentValue } : emp
+      ));
+    } catch (error) {
+      console.error('Error toggling deduction:', error);
     }
   };
 
@@ -642,6 +705,23 @@ function Employees() {
                 </TextField>
               </MuiGrid>
               
+              <MuiGrid item xs={12}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>5% trekk</InputLabel>
+                  <Select
+                    name="apply_five_percent_deduction"
+                    value={newEmployee.apply_five_percent_deduction ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      apply_five_percent_deduction: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
               {/* Only show role selector for admins */}
               {userRole === 'admin' && (
                 <MuiGrid item xs={12}>
@@ -760,6 +840,9 @@ function Employees() {
                       <TableCell>Avdeling</TableCell>
                       <TableCell>Stilling</TableCell>
                       <TableCell>Lønnstrinn</TableCell>
+                      <TableCell>Ansettelsesdato</TableCell>
+                      <TableCell>Ansettelsestid</TableCell>
+                      <TableCell>5% trekk</TableCell>
                       {userRole === 'admin' && <TableCell>Rolle</TableCell>}
                       <TableCell>Handlinger</TableCell>
                     </TableRow>
@@ -767,13 +850,16 @@ function Employees() {
                   <TableBody>
                     {filteredEmployees.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={userRole === 'admin' ? 8 : 7} align="center">
+                        <TableCell colSpan={userRole === 'admin' ? 9 : 8} align="center">
                           Ingen ansatte funnet
                         </TableCell>
                       </TableRow>
                     ) : (
                       filteredEmployees.map((emp) => {
                         const salaryModel = salaryModels.find(model => model.id === emp.salary_model_id);
+                        const hireDate = emp.hire_date ? new Date(emp.hire_date) : null;
+                        const monthsEmployed = hireDate ? (differenceInMonths ? differenceInMonths(new Date(), hireDate) : calculateMonthsDiff(hireDate)) : null;
+                        
                         return (
                           <TableRow key={emp.id} hover>
                             <TableCell>{emp.name}</TableCell>
@@ -797,6 +883,27 @@ function Employees() {
                                   color="success"
                                 />
                               ) : "Ikke angitt"}
+                            </TableCell>
+                            <TableCell>{emp.hire_date || "Ikke angitt"}</TableCell>
+                            <TableCell>
+                              {monthsEmployed !== null ? `${monthsEmployed} måneder` : 'Ukjent'}
+                            </TableCell>
+                            <TableCell>
+                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                <Chip
+                                  label={emp.apply_five_percent_deduction ? 'Ja' : 'Nei'}
+                                  color={emp.apply_five_percent_deduction ? 'primary' : 'default'}
+                                  size="small"
+                                  sx={{ mr: 1 }}
+                                />
+                                <IconButton 
+                                  size="small"
+                                  onClick={() => toggleDeduction(emp.id, emp.apply_five_percent_deduction)}
+                                  color={emp.apply_five_percent_deduction ? 'primary' : 'default'}
+                                >
+                                  {emp.apply_five_percent_deduction ? <ToggleOn /> : <ToggleOff />}
+                                </IconButton>
+                              </Box>
                             </TableCell>
                             {userRole === 'admin' && (
                               <TableCell>
@@ -968,6 +1075,23 @@ function Employees() {
                         {model.name}
                       </MenuItem>
                     ))}
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>5% trekk</InputLabel>
+                  <Select
+                    name="apply_five_percent_deduction"
+                    value={newEmployee.apply_five_percent_deduction ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      apply_five_percent_deduction: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
                   </Select>
                 </FormControl>
               </MuiGrid>
