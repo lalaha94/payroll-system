@@ -13,6 +13,8 @@ import {
   InputAdornment,
   Alert,
   CircularProgress,
+  FormHelperText,
+  AlertTitle,
 } from '@mui/material';
 import { Edit, Comment, CheckCircle } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
@@ -38,14 +40,14 @@ const ApprovalDialog = ({
   }
 
   return (
-    <Dialog
-      open={open}
+    <Dialog 
+      open={open} 
       onClose={onClose}
-      maxWidth="sm"
+      maxWidth="md"
       fullWidth
     >
       <DialogTitle>
-        Godkjenn Månedsprovisjon
+        Godkjenn månedsprovisjon
       </DialogTitle>
       <DialogContent>
         {approvalError && (
@@ -57,12 +59,39 @@ const ApprovalDialog = ({
         <Grid container spacing={2} sx={{ mt: 1 }}>
           <Grid item xs={12}>
             <Typography variant="subtitle1" fontWeight="bold">
-              Godkjenning for {selectedAgent.name}
+              Godkjenn provisjon for {selectedAgent?.name}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Måned: {selectedMonth?.replace('-', '/')}
             </Typography>
           </Grid>
+
+          {selectedAgent?.isModified && (
+            <Grid item xs={12}>
+              <Alert severity="info" sx={{ mb: 2 }}>
+                <AlertTitle>Informasjon om justering</AlertTitle>
+                Provisjonen for denne agenten har blitt justert manuelt. Justeringene inkluderer:
+                {selectedAgent.modificationDetails?.skadeRate && (
+                  <Box component="li">Skadeprovisjon: {selectedAgent.modificationDetails.skadeRate}%</Box>
+                )}
+                {selectedAgent.modificationDetails?.livRate && (
+                  <Box component="li">Livprovisjon: {selectedAgent.modificationDetails.livRate}%</Box>
+                )}
+                {selectedAgent.modificationDetails?.tjenestetorget > 0 && (
+                  <Box component="li">Tjenestetorget trekk: {selectedAgent.modificationDetails.tjenestetorget.toLocaleString('nb-NO')} kr</Box>
+                )}
+                {selectedAgent.modificationDetails?.bytt > 0 && (
+                  <Box component="li">Bytt trekk: {selectedAgent.modificationDetails.bytt.toLocaleString('nb-NO')} kr</Box>
+                )}
+                {selectedAgent.modificationDetails?.other > 0 && (
+                  <Box component="li">Andre trekk: {selectedAgent.modificationDetails.other.toLocaleString('nb-NO')} kr</Box>
+                )}
+                {selectedAgent.modificationDetails?.applyFivePercent !== undefined && (
+                  <Box component="li">5% trekk: {selectedAgent.modificationDetails.applyFivePercent ? 'Ja' : 'Nei'}</Box>
+                )}
+              </Alert>
+            </Grid>
+          )}
           
           <Grid item xs={6}>
             <Typography variant="body2" color="text.secondary">
@@ -91,27 +120,23 @@ const ApprovalDialog = ({
           
           <Grid item xs={12}>
             <TextField
-              label="Provisjonsbeløp (kr)"
+              label="Beløp å godkjenne"
               type="number"
-              InputLabelProps={{
-                shrink: true,
-              }}
               value={batchAmount}
               onChange={(e) => setBatchAmount(e.target.value)}
               fullWidth
-              helperText={
-                parseFloat(batchAmount).toFixed(2) !== selectedAgent.commission.toFixed(2)
-                  ? `${parseFloat(batchAmount) > selectedAgent.commission ? 'Økt' : 'Redusert'} med ${Math.abs(parseFloat(batchAmount) - selectedAgent.commission).toFixed(2).toLocaleString('nb-NO')} kr fra beregnet provisjon`
-                  : 'Samme som beregnet provisjon'
-              }
               InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Edit fontSize="small" />
-                  </InputAdornment>
-                ),
+                startAdornment: <InputAdornment position="start">kr</InputAdornment>,
               }}
             />
+            <FormHelperText>
+              Beløpet som vil godkjennes og utbetales til agenten.
+              {selectedAgent?.commission && selectedAgent.commission !== parseFloat(batchAmount) && (
+                <Typography color="error" variant="caption" display="block">
+                  Dette beløpet avviker fra den beregnede provisjonen ({selectedAgent.commission.toLocaleString('nb-NO')} kr).
+                </Typography>
+              )}
+            </FormHelperText>
           </Grid>
           
           <Grid item xs={12}>

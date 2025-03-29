@@ -16,8 +16,9 @@ import {
   Tooltip,
   Container,
   Fade,
+  useScrollTrigger,
 } from '@mui/material';
-import { useTheme, alpha } from '@mui/material/styles'; // Importer alpha
+import { useTheme, alpha } from '@mui/material/styles';
 import {
   Dashboard,
   Person,
@@ -32,9 +33,8 @@ import {
   AdminPanelSettings,
   Menu as MenuIcon,
 } from '@mui/icons-material';
-import { supabase } from '../supabaseClient'; // Pass på at stien er korrekt
+import { supabase } from '../supabaseClient';
 
-// --- System Font Stack (Beholdes) ---
 const systemFontStack = [
   'system-ui',
   '-apple-system',
@@ -49,15 +49,30 @@ const systemFontStack = [
   '"Segoe UI Symbol"',
 ].join(',');
 
-// Hjelpefunksjon for initialer (Beholdes)
 const getInitials = (name = '') => {
   return name
     .split(' ')
     .map((n) => n[0])
-    .filter((_, i, arr) => i === 0 || i === arr.length - 1) // Første og siste initial
+    .filter((_, i, arr) => i === 0 || i === arr.length - 1)
     .join('')
-    .toUpperCase() || '?'; // Fallback til '?'
+    .toUpperCase() || '?';
 };
+
+function ElevationScroll(props) {
+  const { children } = props;
+  const trigger = useScrollTrigger({
+    disableHysteresis: true,
+    threshold: 0,
+  });
+
+  return React.cloneElement(children, {
+    elevation: trigger ? 4 : 0,
+    sx: {
+      bgcolor: trigger ? alpha('#ffffff', 0.95) : alpha('#ffffff', 0.85),
+      backdropFilter: 'blur(10px)',
+    },
+  });
+}
 
 function NavigationMenu() {
   const theme = useTheme();
@@ -68,232 +83,325 @@ function NavigationMenu() {
   const [userName, setUserName] = useState('');
   const [userMenuAnchor, setUserMenuAnchor] = useState(null);
 
-  // --- useEffect og Handlers (Beholdes som de er) ---
   useEffect(() => {
     const fetchUserData = async () => {
       try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError || !session?.user) { console.log("Ingen aktiv session."); return; }
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+        if (sessionError || !session?.user) {
+          console.log('Ingen aktiv session.');
+          return;
+        }
         const user = session.user;
-        let role = 'user', fetchedName = user.email?.split('@')[0] || 'Bruker';
-        if (user.user_metadata) { /* ... logikk for å hente rolle/navn ... */
-            fetchedName = user.user_metadata.name || fetchedName;
-            if (user.user_metadata.is_super_admin === true || user.user_metadata.is_admin === true) {
-              role = 'admin';
-            } else if (user.user_metadata.role) {
-              role = user.user_metadata.role;
-            }
+        let role = 'user',
+          fetchedName = user.email?.split('@')[0] || 'Bruker';
+        if (user.user_metadata) {
+          fetchedName = user.user_metadata.name || fetchedName;
+          if (
+            user.user_metadata.is_super_admin === true ||
+            user.user_metadata.is_admin === true
+          ) {
+            role = 'admin';
+          } else if (user.user_metadata.role) {
+            role = user.user_metadata.role;
+          }
         }
-        if (role === 'user') { /* ... fallback logikk ... */
-            const { data: employeeData, error: employeeError } = await supabase
-              .from('employees').select('role, name').eq('email', user.email).maybeSingle();
-            if (!employeeError && employeeData) {
-              role = employeeData.role || role;
-              fetchedName = employeeData.name || fetchedName;
-            } else if (employeeError){
-                console.warn("Kunne ikke hente ansattdetaljer:", employeeError.message);
-            }
+        if (role === 'user') {
+          const { data: employeeData, error: employeeError } = await supabase
+            .from('employees')
+            .select('role, name')
+            .eq('email', user.email)
+            .maybeSingle();
+          if (!employeeError && employeeData) {
+            role = employeeData.role || role;
+            fetchedName = employeeData.name || fetchedName;
+          } else if (employeeError) {
+            console.warn(
+              'Kunne ikke hente ansattdetaljer:',
+              employeeError.message
+            );
+          }
         }
-        setUserRole(role); setUserName(fetchedName);
-      } catch (err) { console.error("Feil ved henting av brukerdata:", err); }
+        setUserRole(role);
+        setUserName(fetchedName);
+      } catch (err) {
+        console.error('Feil ved henting av brukerdata:', err);
+      }
     };
     fetchUserData();
   }, []);
   const handleOpenUserMenu = (event) => setUserMenuAnchor(event.currentTarget);
   const handleCloseUserMenu = () => setUserMenuAnchor(null);
-  const handleLogout = async () => { /* ... logikk for utlogging ... */
-      handleCloseUserMenu();
-      try {
-          const { error } = await supabase.auth.signOut();
-          if (error) throw error;
-          navigate('/login');
-      } catch (error) {
-          console.error('Utlogging feilet:', error);
-      }
+  const handleLogout = async () => {
+    handleCloseUserMenu();
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      navigate('/login');
+    } catch (error) {
+      console.error('Utlogging feilet:', error);
+    }
   };
-  // --- Navigasjonslinker Definisjoner ---
-  // *** JUSTERING: Større ikonstørrelse ***
-  const baseNavIconSize = { fontSize: theme.typography.pxToRem(20) }; // Økt
+
+  const baseNavIconSize = { fontSize: theme.typography.pxToRem(20) };
   const adminNavItems = [
-    { path: '/sales-dashboard', label: 'Dashboard', icon: <Dashboard sx={baseNavIconSize} /> },
-    { path: '/employees', label: 'Ansatte', icon: <People sx={baseNavIconSize} /> },
-    { path: '/salary-models', label: 'Lønnstrinn', icon: <Payments sx={baseNavIconSize} /> },
-    { path: '/sales-data', label: 'Salgsdata', icon: <BarChart sx={baseNavIconSize} /> },
-    { path: '/salary-deductions', label: 'Lønnstrekk', icon: <MoneyOff sx={baseNavIconSize} /> },
-    { path: '/accounting-export', label: 'Regnskap', icon: <AccountBalance sx={baseNavIconSize} /> },
+    {
+      path: '/sales-dashboard',
+      label: 'Dashboard',
+      icon: <Dashboard sx={baseNavIconSize} />,
+    },
+    {
+      path: '/employees',
+      label: 'Ansatte',
+      icon: <People sx={baseNavIconSize} />,
+    },
+    {
+      path: '/salary-models',
+      label: 'Lønnstrinn',
+      icon: <Payments sx={baseNavIconSize} />,
+    },
+    {
+      path: '/sales-data',
+      label: 'Salgsdata',
+      icon: <BarChart sx={baseNavIconSize} />,
+    },
+    {
+      path: '/salary-deductions',
+      label: 'Lønnstrekk',
+      icon: <MoneyOff sx={baseNavIconSize} />,
+    },
+    {
+      path: '/accounting-export',
+      label: 'Regnskap',
+      icon: <AccountBalance sx={baseNavIconSize} />,
+    },
   ];
   const managerNavItems = [
-    { path: '/office-dashboard', label: 'Kontor', icon: <Business sx={baseNavIconSize} /> },
-    { path: '/employees', label: 'Ansatte', icon: <People sx={baseNavIconSize} /> },
+    {
+      path: '/office-dashboard',
+      label: 'Kontor',
+      icon: <Business sx={baseNavIconSize} />,
+    },
+    {
+      path: '/employees',
+      label: 'Ansatte',
+      icon: <People sx={baseNavIconSize} />,
+    },
   ];
   const userNavItems = [
-    { path: '/agent-dashboard', label: 'Min Oversikt', icon: <Person sx={baseNavIconSize} /> }
+    {
+      path: '/agent-dashboard',
+      label: 'Min Oversikt',
+      icon: <Person sx={baseNavIconSize} />,
+    },
   ];
   const navItems =
-    userRole === 'admin' ? adminNavItems :
-    userRole === 'manager' ? managerNavItems :
-    userNavItems;
+    userRole === 'admin'
+      ? adminNavItems
+      : userRole === 'manager'
+      ? managerNavItems
+      : userNavItems;
   const isCurrent = (path) => currentPath === path;
 
-  // --- Start på JSX ---
   return (
-    <AppBar
-      position="static"
-      color="default"
-      elevation={0}
-      sx={{
-        backgroundColor: theme.palette.background.paper,
-        borderBottom: `1px solid ${theme.palette.divider}`,
-        mb: 4, // *** JUSTERING: Økt margin under ***
-        fontFamily: systemFontStack,
-      }}
-    >
-      <Container maxWidth="xl">
-         {/* *** JUSTERING: Høyere Toolbar *** */}
-        <Toolbar disableGutters sx={{ justifyContent: 'space-between', minHeight: { xs: 64, sm: 72 } }}>
-          {/* Venstre: Logo/Tittel */}
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-             {/* *** JUSTERING: Større logo-ikon og margin *** */}
-            <Dashboard color="primary" sx={{ mr: 1.5, fontSize: 32 }} />
-            <Typography
-              variant="h5" // *** JUSTERING: Større variant ***
-              noWrap
-              component={Link}
-              to={userRole === 'admin' ? '/sales-dashboard' : userRole === 'manager' ? '/office-dashboard' : '/agent-dashboard'}
-              sx={{
-                mr: 4, // *** JUSTERING: Økt margin ***
-                fontWeight: 600,
-                color: 'inherit',
-                textDecoration: 'none',
-                fontFamily: 'inherit',
-                fontSize: theme.typography.pxToRem(24), // *** JUSTERING: Økt fontstørrelse ***
-              }}
-            >
-              SalesPayroll
-            </Typography>
+    <ElevationScroll>
+      <AppBar
+        position="fixed"
+        color="default"
+        sx={{
+          backgroundColor: alpha(theme.palette.background.paper, 0.85),
+          backdropFilter: 'blur(10px)',
+          borderBottom: `1px solid ${alpha(theme.palette.divider, 0.2)}`,
+          fontFamily: systemFontStack,
+          width: '100%',
+          zIndex: theme.zIndex.drawer + 1,
+          boxShadow: 'none',
+        }}
+      >
+        <Container maxWidth="xl">
+          <Toolbar
+            disableGutters
+            sx={{ justifyContent: 'space-between', minHeight: { xs: 70, sm: 75 } }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Dashboard color="primary" sx={{ mr: 1.5, fontSize: 32 }} />
+              <Typography
+                variant="h5"
+                noWrap
+                component={Link}
+                to={
+                  userRole === 'admin'
+                    ? '/sales-dashboard'
+                    : userRole === 'manager'
+                    ? '/office-dashboard'
+                    : '/agent-dashboard'
+                }
+                sx={{
+                  mr: 4,
+                  fontWeight: 600,
+                  color: 'inherit',
+                  textDecoration: 'none',
+                  fontFamily: 'inherit',
+                  fontSize: theme.typography.pxToRem(24),
+                }}
+              >
+                SalesPayroll
+              </Typography>
 
-            {/* Midten: Navigasjonslenker */}
-            {/* *** JUSTERING: Større gap *** */}
-            <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1 }}>
-              {navItems.map((item) => (
-                <Button
-                  key={item.path}
-                  component={Link}
-                  to={item.path}
-                  size="medium" // *** JUSTERING: Medium knappestørrelse ***
-                  startIcon={item.icon}
-                  sx={{
-                    fontFamily: 'inherit',
-                    color: isCurrent(item.path) ? 'primary.main' : 'text.secondary',
-                    fontWeight: isCurrent(item.path) ? 600 : 400, // Justert vekt
-                    textTransform: 'none', // Endret fra 'all' tilbake til 'none' for lesbarhet
-                    borderRadius: '10px', // *** JUSTERING: Litt større radius ***
-                    fontSize: theme.typography.pxToRem(17), // *** JUSTERING: Økt fontstørrelse ***
-                    px: 2, // *** JUSTERING: Økt horisontal padding ***
-                    // py: 1, // 'py' styres av size="medium", unngå dobbel spesifisering
-                    '&:hover': {
-                      backgroundColor: alpha(theme.palette.primary.main, 0.05),
-                      color: isCurrent(item.path) ? 'primary.dark' : 'text.primary',
-                    },
-                  }}
-                >
-                  {item.label}
-                </Button>
-              ))}
+              <Box
+                sx={{
+                  display: { xs: 'none', md: 'flex' },
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                {navItems.map((item) => (
+                  <Button
+                    key={item.path}
+                    component={Link}
+                    to={item.path}
+                    size="medium"
+                    startIcon={item.icon}
+                    sx={{
+                      fontFamily: 'inherit',
+                      color: isCurrent(item.path)
+                        ? 'primary.main'
+                        : 'text.secondary',
+                      fontWeight: isCurrent(item.path) ? 600 : 400,
+                      textTransform: 'none',
+                      borderRadius: '10px',
+                      fontSize: theme.typography.pxToRem(17),
+                      px: 2,
+                      '&:hover': {
+                        backgroundColor: alpha(theme.palette.primary.main, 0.05),
+                        color: isCurrent(item.path)
+                          ? 'primary.dark'
+                          : 'text.primary',
+                      },
+                    }}
+                  >
+                    {item.label}
+                  </Button>
+                ))}
+              </Box>
             </Box>
-          </Box>
 
-          {/* Høyre: Brukermeny */}
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            {userName ? (
-              <>
-                <Tooltip title="Brukerkonto">
-                  {/* *** JUSTERING: Større Avatar/Padding *** */}
-                  <IconButton onClick={handleOpenUserMenu} sx={{ p: 0.5, ml: 1.5 }}>
-                    <Avatar
-                      sx={{
-                        width: 40, height: 40,
-                        fontSize: theme.typography.pxToRem(16),
-                        bgcolor: 'primary.light',
-                        color: 'primary.contrastText',
-                        fontFamily: 'inherit',
-                      }}
-                    >
-                      {getInitials(userName)}
-                    </Avatar>
-                     <Typography
-                        variant="body1" // *** JUSTERING: Større variant for navn ***
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              {userName ? (
+                <>
+                  <Tooltip title="Brukerkonto">
+                    <IconButton onClick={handleOpenUserMenu} sx={{ p: 0.5, ml: 1.5 }}>
+                      <Avatar
+                        sx={{
+                          width: 40,
+                          height: 40,
+                          fontSize: theme.typography.pxToRem(16),
+                          bgcolor: 'primary.light',
+                          color: 'primary.contrastText',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        {getInitials(userName)}
+                      </Avatar>
+                      <Typography
+                        variant="body1"
                         sx={{
                           ml: 1.5,
                           display: { xs: 'none', sm: 'inline' },
                           fontWeight: 500,
                           fontFamily: 'inherit',
-                          fontSize: theme.typography.pxToRem(16), // *** JUSTERING: Økt font for navn ***
-                         }}>
+                          fontSize: theme.typography.pxToRem(16),
+                        }}
+                      >
                         {userName}
-                    </Typography>
-                    {/* *** JUSTERING: Større ikon *** */}
-                    <KeyboardArrowDown fontSize="medium" sx={{ ml: 0.5, color: 'text.secondary' }} />
-                  </IconButton>
-                </Tooltip>
-                <Menu
-                  anchorEl={userMenuAnchor}
-                  open={Boolean(userMenuAnchor)}
-                  onClose={handleCloseUserMenu}
-                  TransitionComponent={Fade}
-                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-                  transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-                  PaperProps={{
-                    elevation: 3,
-                    sx: { // *** JUSTERING: Større meny og innhold ***
-                      mt: 1.5, minWidth: 240, borderRadius: '10px',
-                      fontFamily: systemFontStack,
-                      '& .MuiMenuItem-root': {
+                      </Typography>
+                      <KeyboardArrowDown
+                        fontSize="medium"
+                        sx={{ ml: 0.5, color: 'text.secondary' }}
+                      />
+                    </IconButton>
+                  </Tooltip>
+                  <Menu
+                    anchorEl={userMenuAnchor}
+                    open={Boolean(userMenuAnchor)}
+                    onClose={handleCloseUserMenu}
+                    TransitionComponent={Fade}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                    transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                    PaperProps={{
+                      elevation: 3,
+                      sx: {
+                        mt: 1.5,
+                        minWidth: 240,
+                        borderRadius: '10px',
+                        fontFamily: systemFontStack,
+                        backdropFilter: 'blur(10px)',
+                        bgcolor: alpha(theme.palette.background.paper, 0.95),
+                        '& .MuiMenuItem-root': {
                           fontSize: theme.typography.pxToRem(15),
                           py: '10px',
+                        },
+                        '& .MuiTypography-subtitle2': {
+                          fontSize: theme.typography.pxToRem(16),
+                          fontWeight: 600,
+                        },
+                        '& .MuiTypography-caption': {
+                          fontSize: theme.typography.pxToRem(13),
+                        },
+                        '& .MuiListItemIcon-root': {
+                          minWidth: '40px',
+                          '& .MuiSvgIcon-root': {
+                            fontSize: theme.typography.pxToRem(22),
+                          },
+                        },
                       },
-                      '& .MuiTypography-subtitle2': { fontSize: theme.typography.pxToRem(16), fontWeight: 600 },
-                      '& .MuiTypography-caption': { fontSize: theme.typography.pxToRem(13) },
-                       '& .MuiListItemIcon-root': {
-                           minWidth: '40px',
-                           '& .MuiSvgIcon-root': { fontSize: theme.typography.pxToRem(22) }
-                       }
-                    }
+                    }}
+                  >
+                    <Box sx={{ px: 2, py: 2 }}>
+                      <Typography variant="subtitle2">{userName}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {userRole === 'admin'
+                          ? 'Administrator'
+                          : userRole === 'manager'
+                          ? 'Kontorleder'
+                          : 'Bruker'}
+                      </Typography>
+                    </Box>
+                    <Divider sx={{ my: 0.5 }} />
+                    <MenuItem onClick={handleLogout} sx={{ color: 'text.secondary' }}>
+                      <ListItemIcon>
+                        <Logout sx={{ fontSize: theme.typography.pxToRem(22) }} />
+                      </ListItemIcon>
+                      <ListItemText
+                        primaryTypographyProps={{ fontSize: 'inherit' }}
+                      >
+                        Logg ut
+                      </ListItemText>
+                    </MenuItem>
+                  </Menu>
+                </>
+              ) : (
+                <Button
+                  component={Link}
+                  to="/login"
+                  color="primary"
+                  size="medium"
+                  sx={{
+                    fontFamily: 'inherit',
+                    fontSize: theme.typography.pxToRem(15),
+                    textTransform: 'none',
                   }}
                 >
-                   {/* *** JUSTERING: Mer padding i header *** */}
-                   <Box sx={{ px: 2, py: 2 }}>
-                       <Typography variant="subtitle2" >{userName}</Typography>
-                       <Typography variant="caption" color="text.secondary">
-                           {userRole === 'admin' ? 'Administrator' :
-                            userRole === 'manager' ? 'Kontorleder' : 'Bruker'}
-                       </Typography>
-                   </Box>
-                  <Divider sx={{ my: 0.5 }}/>
-                  <MenuItem onClick={handleLogout} sx={{ color: 'text.secondary' }}>
-                    <ListItemIcon>
-                      {/* *** JUSTERING: Større ikon *** */}
-                      <Logout sx={{fontSize: theme.typography.pxToRem(22)}} />
-                    </ListItemIcon>
-                    <ListItemText primaryTypographyProps={{ fontSize: 'inherit' }}>Logg ut</ListItemText>
-                  </MenuItem>
-                </Menu>
-              </>
-            ) : (
-              <Button
-                component={Link}
-                to="/login"
-                color="primary"
-                size="medium" // *** JUSTERING: Medium størrelse ***
-                sx={{ fontFamily: 'inherit', fontSize: theme.typography.pxToRem(15), textTransform: 'none' }}
-              >
-                Logg inn
-              </Button>
-            )}
-          </Box>
-        </Toolbar>
-      </Container>
-    </AppBar>
+                  Logg inn
+                </Button>
+              )}
+            </Box>
+          </Toolbar>
+        </Container>
+      </AppBar>
+    </ElevationScroll>
   );
 }
 

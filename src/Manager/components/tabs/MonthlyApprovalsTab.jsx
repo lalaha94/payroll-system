@@ -140,6 +140,67 @@ const MonthlyApprovalsTab = ({
   // Get the sorted agents now so we can see what we're working with
   const sortedAgentsList = sortedAgents();
 
+  // Modified function to calculate commission
+  const calculateAgentApprovalData = (agent) => {
+    // Check if the agent already has calculated commission values
+    if (agent.totalCommission !== undefined) {
+      // Return the pre-calculated commission based on the AgentTab modifications
+      return {
+        name: agent.name,
+        commission: agent.totalCommission,
+        // Use already calculated values if available
+        isModified: agent.overriddenSkadeRate || agent.overriddenLivRate || agent.overriddenDeductions,
+        modificationDetails: {
+          skadeRate: agent.skadeCommissionRate,
+          livRate: agent.livCommissionRate,
+          tjenestetorget: agent.tjenestetorgetDeduction || 0,
+          bytt: agent.byttDeduction || 0,
+          other: agent.otherDeductions || 0,
+          applyFivePercent: agent.applyFivePercent
+        }
+      };
+    }
+    
+    // Calculate from scratch if needed
+    const livCommission = agent.livPremium * (agent.livCommissionRate || 0) / 100;
+    const skadeCommission = agent.skadePremium * (agent.skadeCommissionRate || 0) / 100;
+    const baseCommission = livCommission + skadeCommission;
+    
+    // Apply deductions
+    const fivePercentDeduction = agent.applyFivePercent ? baseCommission * 0.05 : 0;
+    const otherDeductions = 
+      (agent.tjenestetorgetDeduction || 0) + 
+      (agent.byttDeduction || 0) + 
+      (agent.otherDeductions || 0);
+    
+    const totalCommission = baseCommission - fivePercentDeduction - otherDeductions;
+    
+    return {
+      name: agent.name,
+      commission: totalCommission,
+      isModified: agent.overriddenSkadeRate || agent.overriddenLivRate || agent.overriddenDeductions,
+      modificationDetails: {
+        skadeRate: agent.skadeCommissionRate,
+        livRate: agent.livCommissionRate,
+        tjenestetorget: agent.tjenestetorgetDeduction || 0,
+        bytt: agent.byttDeduction || 0,
+        other: agent.otherDeductions || 0,
+        applyFivePercent: agent.applyFivePercent
+      }
+    };
+  };
+
+  // Add this function to prepare agent data before batch approval
+  const prepareAgentForApproval = (agent) => {
+    const approvalData = calculateAgentApprovalData(agent);
+    return {
+      ...agent,
+      commission: approvalData.commission,
+      isModified: approvalData.isModified,
+      modificationDetails: approvalData.modificationDetails
+    };
+  };
+
   return (
     <Box sx={{ p: 3 }}>
       <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -250,11 +311,10 @@ const MonthlyApprovalsTab = ({
                   </TableCell>
                 </TableRow>
               ) : (
-                // Fix the filtering that's causing Tobias not to show up
                 sortedAgentsList.map((agent, index) => {
-                  // This is the key change - only filter out APPROVED agents when showApproved is FALSE
-                  const shouldShow = !agent.isApproved || showApproved;
-                  console.log(`Agent: ${agent.name}, isApproved: ${agent.isApproved}, showApproved: ${showApproved}, shouldShow: ${shouldShow}`);
+                  // Process agent data to include any modifications
+                  const agentWithApprovalData = prepareAgentForApproval(agent);
+                  const shouldShow = !agentWithApprovalData.isApproved || showApproved;
                   
                   return shouldShow && (
                     <TableRow key={agent.id || `agent-${index}`} hover>
@@ -301,13 +361,11 @@ const MonthlyApprovalsTab = ({
                       <TableCell align="right" sx={{ fontWeight: 'bold' }}>
                         {(agent.totalPremium || 0).toLocaleString('nb-NO')} kr
                       </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
-                        {(agent.commission || 0).toFixed(2).toLocaleString('nb-NO')} kr
-                        {agent.isApproved && agent.approvalRecord?.approved_commission !== agent.commission && (
-                          <Tooltip title="Justert beløp">
-                            <Box component="span" sx={{ display: 'block', fontSize: '0.75rem', color: 'text.secondary' }}>
-                              Godkjent: {parseFloat(agent.approvalRecord?.approved_commission || 0).toFixed(2).toLocaleString('nb-NO')} kr
-                            </Box>
+                      <TableCell align="right" sx={{ fontWeight: 'bold', color: agentWithApprovalData.isModified ? theme.palette.warning.main : theme.palette.success.main }}>
+                        {agentWithApprovalData.commission.toLocaleString('nb-NO', { minimumFractionDigits: 2 })} kr
+                        {agentWithApprovalData.isModified && (
+                          <Tooltip title="Provisjon er justert manuelt">
+                            <Box component="span" sx={{ display: 'inline-block', ml: 1 }}>*</Box>
                           </Tooltip>
                         )}
                       </TableCell>

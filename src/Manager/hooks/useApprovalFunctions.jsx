@@ -180,7 +180,23 @@ export const useApprovalFunctions = ({
         agent_company: managerData.agent_company
       };
       
-      console.log(`Running detailed approval check for ${selectedAgent.name} / ${selectedMonth}`);
+      // Add commission modification information to metadata
+      const approvalMetadata = {};
+      if (selectedAgent.isModified) {
+        approvalMetadata.modifiedRates = {
+          skadeRate: selectedAgent.skadeCommissionRate,
+          livRate: selectedAgent.livCommissionRate
+        };
+        
+        approvalMetadata.modifiedDeductions = {
+          tjenestetorget: selectedAgent.tjenestetorgetDeduction || 0,
+          bytt: selectedAgent.byttDeduction || 0,
+          other: selectedAgent.otherDeductions || 0,
+          fivePercent: selectedAgent.applyFivePercent
+        };
+      }
+      
+      let result;
       
       const { data: existingRecord, error: checkError } = await supabase
         .from('monthly_commission_approvals')
@@ -194,8 +210,6 @@ export const useApprovalFunctions = ({
         console.log("Detailed check results:", existingRecord);
       }
       
-      let result;
-      
       if (existingRecord && existingRecord.length > 0) {
         const recordToUpdate = existingRecord[0];
         console.log(`Found existing record (ID: ${recordToUpdate.id}), updating it directly`);
@@ -207,7 +221,8 @@ export const useApprovalFunctions = ({
             agent_name: selectedAgent.name,
             month_year: selectedMonth,
             agent_company: managerData.agent_company,
-            revoked: false
+            revoked: false,
+            approval_metadata: Object.keys(approvalMetadata).length > 0 ? approvalMetadata : null
           })
           .eq('id', recordToUpdate.id)
           .select();
@@ -227,7 +242,8 @@ export const useApprovalFunctions = ({
             agent_name: selectedAgent.name,
             month_year: selectedMonth, 
             agent_company: managerData.agent_company,
-            ...approvalData
+            ...approvalData,
+            approval_metadata: Object.keys(approvalMetadata).length > 0 ? approvalMetadata : null
           };
           
           console.log("Inserting new record:", newRecord);
@@ -285,7 +301,8 @@ export const useApprovalFunctions = ({
                     agent_name: selectedAgent.name,
                     month_year: selectedMonth,
                     agent_company: managerData.agent_company,
-                    ...approvalData
+                    ...approvalData,
+                    approval_metadata: Object.keys(approvalMetadata).length > 0 ? approvalMetadata : null
                   }], 
                   success: true, 
                   action: "emergency-inserted" 
@@ -296,7 +313,10 @@ export const useApprovalFunctions = ({
                 
                 const { data: conflictUpdate, error: conflictUpdateError } = await supabase
                   .from('monthly_commission_approvals')
-                  .update(approvalData)
+                  .update({
+                    ...approvalData,
+                    approval_metadata: Object.keys(approvalMetadata).length > 0 ? approvalMetadata : null
+                  })
                   .eq('id', conflictRecord.id)
                   .select();
                   
@@ -344,6 +364,7 @@ export const useApprovalFunctions = ({
                     approved_at: new Date().toISOString(),
                     approval_comment: batchComment || null,
                     revoked: false,
+                    approval_metadata: Object.keys(approvalMetadata).length > 0 ? approvalMetadata : null
                   },
                 }
               : agent

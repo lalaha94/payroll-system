@@ -14,6 +14,7 @@ import AgentDashboard from './AgentDashboard'; // Import the new component
 import Login from './components/Login';
 import OfficeManagerDashboard from './OfficeManagerDashboard'; // Add this import
 import './index.css';
+import LandingPage from './LandingPage'; // Import the new component
 
 // Error boundary component to catch rendering errors
 class ErrorBoundary extends React.Component {

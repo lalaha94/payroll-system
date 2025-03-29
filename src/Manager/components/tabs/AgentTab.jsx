@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   Typography,
@@ -56,6 +56,97 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     sickLeave: "",
     applyFivePercent: true
   });
+  const [localAgentData, setLocalAgentData] = useState([]);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+
+  useEffect(() => {
+    if (agentPerformance && agentPerformance.length > 0) {
+      if (isInitialLoad || 
+          !localAgentData.length || 
+          !agentPerformance.every(agent => 
+            localAgentData.some(localAgent => localAgent.id === agent.id)
+          )) {
+        fetchAgentDetails();
+      } else {
+        const mergedData = agentPerformance.map(agent => {
+          const existingAgent = localAgentData.find(a => a.id === agent.id || a.name === agent.name);
+          if (existingAgent) {
+            return {
+              ...agent,
+              skadeCommissionRate: existingAgent.skadeCommissionRate || agent.skadeCommissionRate,
+              livCommissionRate: existingAgent.livCommissionRate || agent.livCommissionRate,
+              tjenestetorgetDeduction: existingAgent.tjenestetorgetDeduction || agent.tjenestetorgetDeduction || 0,
+              byttDeduction: existingAgent.byttDeduction || agent.byttDeduction || 0,
+              otherDeductions: existingAgent.otherDeductions || agent.otherDeductions || 0,
+              baseSalary: existingAgent.baseSalary || agent.baseSalary || 0,
+              bonus: existingAgent.bonus || agent.bonus || 0,
+              sickLeave: existingAgent.sickLeave || agent.sickLeave || "",
+              applyFivePercent: existingAgent.applyFivePercent !== undefined ? existingAgent.applyFivePercent : agent.applyFivePercent
+            };
+          }
+          return agent;
+        });
+        setLocalAgentData(mergedData);
+        
+        if (updateAgentPerformance) {
+          updateAgentPerformance(mergedData);
+        }
+      }
+    }
+  }, [agentPerformance]);
+
+  const fetchAgentDetails = async () => {
+    try {
+      const { data: employees, error } = await supabase
+        .from('employees')
+        .select('*');
+      
+      if (error) {
+        console.error('Error fetching employee details:', error);
+        return;
+      }
+      
+      const mergedData = agentPerformance.map(agent => {
+        const employeeMatch = employees.find(emp => 
+          emp.name === agent.name || emp.agent_id === agent.agent_id
+        );
+        
+        if (employeeMatch) {
+          const salaryModel = salaryModels.find(model => 
+            model.id === parseInt(employeeMatch.salary_model_id)
+          );
+          
+          return {
+            ...agent,
+            skadeCommissionRate: agent.skadeCommissionRate || (salaryModel ? salaryModel.commission_skade : 0),
+            livCommissionRate: agent.livCommissionRate || (salaryModel ? salaryModel.commission_liv : 0),
+            tjenestetorgetDeduction: agent.tjenestetorgetDeduction || employeeMatch.tjenestetorget_deduction || 0,
+            byttDeduction: agent.byttDeduction || employeeMatch.bytt_deduction || 0,
+            otherDeductions: agent.otherDeductions || employeeMatch.other_deductions || 0,
+            baseSalary: agent.baseSalary || employeeMatch.base_salary || 0,
+            bonus: agent.bonus || employeeMatch.bonus || 0,
+            sickLeave: agent.sickLeave || employeeMatch.sick_leave || "",
+            applyFivePercent: agent.applyFivePercent !== undefined ? 
+              agent.applyFivePercent : 
+              (employeeMatch.apply_five_percent_deduction !== null ? 
+                employeeMatch.apply_five_percent_deduction : 
+                true)
+          };
+        }
+        return agent;
+      });
+      
+      setLocalAgentData(mergedData);
+      
+      if (updateAgentPerformance) {
+        updateAgentPerformance(mergedData);
+      }
+      
+      setIsInitialLoad(false);
+    } catch (err) {
+      console.error('Error processing agent details:', err);
+    }
+  };
 
   const getSortIcon = (key) => {
     if (sortConfig.key !== key) return null;
@@ -131,15 +222,23 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
       const { error: updateError } = await supabase
         .from('employees')
         .update({ 
-          apply_five_percent_deduction: editValues.applyFivePercent 
+          apply_five_percent_deduction: editValues.applyFivePercent,
+          tjenestetorget_deduction: parseFloat(editValues.tjenestetorgetDeduction) || 0,
+          bytt_deduction: parseFloat(editValues.byttDeduction) || 0,
+          other_deductions: parseFloat(editValues.otherDeductions) || 0,
+          base_salary: parseFloat(editValues.baseSalary) || 0,
+          bonus: parseFloat(editValues.bonus) || 0,
+          sick_leave: editValues.sickLeave || null,
+          commission_skade_override: parseFloat(editValues.skadeCommissionRate) || null,
+          commission_liv_override: parseFloat(editValues.livCommissionRate) || null
         })
         .eq('id', employeeData.id);
       
       if (updateError) {
-        throw new Error(`Kunne ikke oppdatere 5% trekk: ${updateError.message}`);
+        throw new Error(`Kunne ikke oppdatere ansattdata: ${updateError.message}`);
       }
       
-      const updatedAgentPerformance = agentPerformance.map(agent => 
+      const updatedAgentPerformance = localAgentData.map(agent => 
         agent.name === editingAgent.name 
           ? { 
               ...agent, 
@@ -151,17 +250,30 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
               otherDeductions: parseFloat(editValues.otherDeductions) || 0,
               baseSalary: parseFloat(editValues.baseSalary) || 0,
               bonus: parseFloat(editValues.bonus) || 0,
-              sickLeave: editValues.sickLeave || ""
+              sickLeave: editValues.sickLeave || "",
+              overriddenSkadeRate: true,
+              overriddenLivRate: true,
+              overriddenDeductions: true,
+              totalCommission: calculateTotalCommission({
+                ...agent,
+                applyFivePercent: editValues.applyFivePercent,
+                skadeCommissionRate: parseFloat(editValues.skadeCommissionRate) || agent.skadeCommissionRate,
+                livCommissionRate: parseFloat(editValues.livCommissionRate) || agent.livCommissionRate,
+                tjenestetorgetDeduction: parseFloat(editValues.tjenestetorgetDeduction) || 0,
+                byttDeduction: parseFloat(editValues.byttDeduction) || 0,
+                otherDeductions: parseFloat(editValues.otherDeductions) || 0
+              }).totalCommission
             } 
           : agent
       );
+      
+      setLocalAgentData(updatedAgentPerformance);
       
       if (updateAgentPerformance) {
         updateAgentPerformance(updatedAgentPerformance);
       }
       
       console.log("Changes saved successfully for agent:", editingAgent.name);
-      console.log("Updated values:", editValues);
       
       handleCloseEditDialog();
     } catch (error) {
@@ -200,9 +312,11 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
         return;
       }
       
-      const updatedAgentPerformance = agentPerformance.map(a => 
+      const updatedAgentPerformance = localAgentData.map(a => 
         a.name === agent.name ? { ...a, applyFivePercent: !currentValue } : a
       );
+      
+      setLocalAgentData(updatedAgentPerformance);
       
       if (updateAgentPerformance) {
         updateAgentPerformance(updatedAgentPerformance);
@@ -215,11 +329,11 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
   };
 
   const sortedAgents = () => {
-    if (!agentPerformance || agentPerformance.length === 0) {
+    if (!localAgentData || localAgentData.length === 0) {
       return [];
     }
     
-    const filteredAgents = agentPerformance.filter(agent => {
+    const filteredAgents = localAgentData.filter(agent => {
       if (!agent || !agent.name) return false;
       return agent.name.toLowerCase().includes(searchTerm.toLowerCase());
     });
@@ -248,25 +362,19 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     });
   };
 
-  // Calculate total commission for an agent
   const calculateTotalCommission = (agent) => {
-    // Calculate base commissions
     const skadeCommission = agent.skadePremium * (agent.skadeCommissionRate || 0) / 100;
     const livCommission = agent.livPremium * (agent.livCommissionRate || 0) / 100;
     
-    // Calculate total base commission
     const baseCommission = skadeCommission + livCommission;
     
-    // Apply 5% deduction if enabled
     const fivePercentDeduction = agent.applyFivePercent ? baseCommission * 0.05 : 0;
     
-    // Other deductions
     const otherDeductions = 
       (agent.tjenestetorgetDeduction || 0) + 
       (agent.byttDeduction || 0) + 
       (agent.otherDeductions || 0);
     
-    // Calculate final commission amount
     const totalCommission = baseCommission - fivePercentDeduction - otherDeductions;
     
     return {
@@ -283,6 +391,7 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     <Box sx={{ p: 3 }}>
       <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Typography variant="h6" fontWeight="bold">
+          Agentprestasjoner
         </Typography>
         
         <TextField 
@@ -301,283 +410,260 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
         />
       </Box>
       
-      <TableContainer sx={{ maxHeight: 600 }}>
-        <Table stickyHeader>
-          <TableHead>
-            <TableRow>
-              <TableCell onClick={() => requestSort('ranking')} sx={{ cursor: 'pointer' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  #
-                  {getSortIcon('ranking')}
-                </Box>
-              </TableCell>
-              
-              <TableCell onClick={() => requestSort('salaryModelName')} sx={{ cursor: 'pointer', minWidth: 120 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  Lønnstrinn / Stilling
-                  {getSortIcon('salaryModelName')}
-                </Box>
-              </TableCell>
-              
-              <TableCell onClick={() => requestSort('name')} sx={{ cursor: 'pointer', minWidth: 150 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  Navn
-                  {getSortIcon('name')}
-                </Box>
-              </TableCell>
-              
-              <TableCell onClick={() => requestSort('skadePremium')} align="right" sx={{ cursor: 'pointer' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  Skadesalg
-                  {getSortIcon('skadePremium')}
-                </Box>
-              </TableCell>
-              
-              <TableCell onClick={() => requestSort('livPremium')} align="right" sx={{ cursor: 'pointer' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  Livsalg
-                  {getSortIcon('livPremium')}
-                </Box>
-              </TableCell>
-              
-              <TableCell align="right" sx={{ minWidth: 120 }}>
-                Skadeprovisjon %
-              </TableCell>
-              
-              <TableCell align="right" sx={{ minWidth: 120 }}>
-                Livprovisjon %
-              </TableCell>
-              
-              <TableCell align="right">
-                Anbud Tjenestetorget
-              </TableCell>
-              
-              <TableCell align="right">
-                Anbud Bytt
-              </TableCell>
-              
-              <TableCell align="right">
-                Andre anbud
-              </TableCell>
-              
-              <TableCell onClick={() => requestSort('totalCommission')} align="right" sx={{ cursor: 'pointer', minWidth: 140 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                  Total provisjon
-                  {getSortIcon('totalCommission')}
-                </Box>
-              </TableCell>
-              
-              <TableCell align="right">
-                Fastlønn
-              </TableCell>
-              
-              <TableCell align="right">
-                Bonus
-              </TableCell>
-              
-              <TableCell align="center">
-                Egenmelding
-              </TableCell>
-              
-              <TableCell align="center">
-                5% trekk
-              </TableCell>
-              
-              <TableCell align="center">
-                Handlinger
-              </TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {sortedAgents().length === 0 ? (
+      <Box sx={{ 
+        position: 'relative',
+        '&::after': {
+          content: '""',
+          position: 'absolute',
+          bottom: 0,
+          right: 0,
+          height: '100%',
+          width: '15px',
+          background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.05) 100%)',
+          pointerEvents: 'none',
+          zIndex: 1,
+          display: { xs: 'block', md: 'none' },
+        },
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          bottom: 0,
+          height: '15px',
+          width: '100%',
+          background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.05) 100%)',
+          pointerEvents: 'none',
+          zIndex: 1,
+        }
+      }}>
+        <TableContainer 
+          sx={{ 
+            maxHeight: 600,
+            overflow: 'auto',
+            scrollbarWidth: 'thin',
+            '&::-webkit-scrollbar': {
+              width: '8px',
+              height: '8px',
+            },
+            '&::-webkit-scrollbar-track': {
+              backgroundColor: 'rgba(0,0,0,0.05)',
+              borderRadius: '8px',
+            },
+            '&::-webkit-scrollbar-thumb': {
+              backgroundColor: 'rgba(0,0,0,0.15)',
+              borderRadius: '8px',
+              '&:hover': {
+                backgroundColor: 'rgba(0,0,0,0.25)',
+              },
+            },
+          }}
+        >
+          <Table 
+            stickyHeader 
+            size="small"
+            sx={{ 
+              tableLayout: 'fixed',
+              '& .MuiTableCell-root': {
+                paddingTop: '8px',
+                paddingBottom: '8px',
+              },
+              '& .MuiTableCell-sizeSmall': {
+                paddingTop: '6px',
+                paddingBottom: '6px',
+              }
+            }}
+          >
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={16} align="center">
-                  Ingen agenter funnet
+                <TableCell onClick={() => requestSort('ranking')} sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    #
+                    {getSortIcon('ranking')}
+                  </Box>
+                </TableCell>
+                <TableCell onClick={() => requestSort('name')} sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    Navn
+                    {getSortIcon('name')}
+                  </Box>
+                </TableCell>
+                <TableCell onClick={() => requestSort('salaryModelName')} sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    Lønnstrinn / Stilling
+                    {getSortIcon('salaryModelName')}
+                  </Box>
+                </TableCell>
+                <TableCell onClick={() => requestSort('skadePremium')} align="right" sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                    Skadesalg
+                    {getSortIcon('skadePremium')}
+                  </Box>
+                </TableCell>
+                <TableCell onClick={() => requestSort('livPremium')} align="right" sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                    Livsalg
+                    {getSortIcon('livPremium')}
+                  </Box>
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                  Skadeprovisjon %
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                  Livprovisjon %
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                  Anbud Tjenestetorget
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                  Anbud Bytt
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                  Andre anbud
+                </TableCell>
+                <TableCell onClick={() => requestSort('totalCommission')} align="right" sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                    Total provisjon
+                    {getSortIcon('totalCommission')}
+                  </Box>
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                  Fastlønn
+                </TableCell>
+                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                  Bonus
+                </TableCell>
+                <TableCell align="center" sx={{ fontWeight: 'bold' }}>
+                  Egenmelding
+                </TableCell>
+                <TableCell align="center" sx={{ fontWeight: 'bold' }}>
+                  5% trekk
+                </TableCell>
+                <TableCell align="center" sx={{ fontWeight: 'bold' }}>
+                  Handlinger
                 </TableCell>
               </TableRow>
-            ) : (
-              sortedAgents().map(agent => {
-                const isSkadeRateOverridden = agent.overriddenSkadeRate;
-                const isLivRateOverridden = agent.overriddenLivRate;
-                const isDeductionsOverridden = agent.overriddenDeductions;
-                
-                const commissionDetails = calculateTotalCommission(agent);
-                
-                return (
-                  <TableRow key={agent.id} hover>
-                    <TableCell>
-                      <Chip 
-                        size="small" 
-                        label={agent.ranking} 
-                        color={
-                          agent.ranking === 1 ? "success" :
-                          agent.ranking === 2 ? "primary" :
-                          agent.ranking === 3 ? "secondary" : 
-                          "default"
-                        }
-                        variant="filled"
-                        sx={{ 
-                          minWidth: '30px', 
-                          fontWeight: 'bold',
-                          ...(agent.ranking <= 3 ? { color: 'white' } : {})
-                        }}
-                      />
-                    </TableCell>
-                    
-                    <TableCell>
-                      <Box>
+            </TableHead>
+            <TableBody>
+              {sortedAgents().length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={16} align="center">
+                    Ingen agenter funnet
+                  </TableCell>
+                </TableRow>
+              ) : (
+                sortedAgents().map(agent => {
+                  const commissionDetails = calculateTotalCommission(agent);
+                  return (
+                    <TableRow key={agent.id} hover>
+                      <TableCell>
                         <Chip 
-                          label={agent.salaryModelName} 
+                          label={agent.ranking} 
                           size="small" 
-                          variant="outlined"
-                          color="primary"
+                          color={
+                            agent.ranking === 1 ? "success" :
+                            agent.ranking === 2 ? "primary" :
+                            agent.ranking === 3 ? "secondary" : 
+                            "default"
+                          }
+                          sx={{ 
+                            minWidth: '30px', 
+                            fontWeight: 'bold',
+                            ...(agent.ranking <= 3 ? { color: 'white' } : {})
+                          }}
                         />
-                        <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                          {agent.position || "Rådgiver"}
-                        </Typography>
-                      </Box>
-                    </TableCell>
-                    
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                        <Avatar sx={{ 
-                          width: 32, 
-                          height: 32, 
-                          mr: 1, 
-                          bgcolor: agent.ranking <= 3 
-                            ? CHART_COLORS[agent.ranking - 1] 
-                            : '#bdbdbd'
-                        }}>
-                          {agent.name.substring(0, 1)}
-                        </Avatar>
-                        {agent.name}
-                      </Box>
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      {(agent.skadePremium || 0).toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      {(agent.livPremium || 0).toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      <Box sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'flex-end',
-                        color: isSkadeRateOverridden ? theme.palette.error.main : 'inherit',
-                        fontWeight: isSkadeRateOverridden ? 'bold' : 'normal',
-                      }}>
-                        {agent.skadeCommissionRate || "-"}%
-                        {isSkadeRateOverridden && 
-                          <Tooltip title="Overstyrt verdi">
-                            <Warning fontSize="small" color="error" sx={{ ml: 0.5 }} />
-                          </Tooltip>
-                        }
-                      </Box>
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      <Box sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'flex-end',
-                        color: isLivRateOverridden ? theme.palette.error.main : 'inherit',
-                        fontWeight: isLivRateOverridden ? 'bold' : 'normal',
-                      }}>
-                        {agent.livCommissionRate || "-"}%
-                        {isLivRateOverridden && 
-                          <Tooltip title="Overstyrt verdi">
-                            <Warning fontSize="small" color="error" sx={{ ml: 0.5 }} />
-                          </Tooltip>
-                        }
-                      </Box>
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      {(agent.tjenestetorgetDeduction || 0).toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      {(agent.byttDeduction || 0).toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      <Box sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'flex-end',
-                        color: isDeductionsOverridden ? theme.palette.error.main : 'inherit',
-                        fontWeight: isDeductionsOverridden ? 'bold' : 'normal',
-                      }}>
-                        {(agent.otherDeductions || 0).toLocaleString('nb-NO')} kr
-                        {isDeductionsOverridden && 
-                          <Tooltip title="Overstyrt verdi">
-                            <Warning fontSize="small" color="error" sx={{ ml: 0.5 }} />
-                          </Tooltip>
-                        }
-                      </Box>
-                    </TableCell>
-                    
-                    <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
-                      <Box>
-                        {commissionDetails.totalCommission.toLocaleString('nb-NO')} kr
-                        
-                        {agent.applyFivePercent && commissionDetails.fivePercentDeduction > 0 && (
-                          <Typography 
-                            variant="caption" 
-                            display="block" 
-                            color="text.secondary"
-                            sx={{ fontSize: '0.7rem' }}
-                          >
-                            (-5%: {commissionDetails.fivePercentDeduction.toLocaleString('nb-NO')} kr)
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                          <Avatar sx={{ 
+                            width: 32, 
+                            height: 32, 
+                            mr: 1, 
+                            bgcolor: agent.ranking <= 3 
+                              ? CHART_COLORS[agent.ranking - 1] 
+                              : '#bdbdbd'
+                          }}>
+                            {agent.name.substring(0, 1)}
+                          </Avatar>
+                          {agent.name}
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Box>
+                          <Chip 
+                            label={agent.salaryModelName} 
+                            size="small" 
+                            variant="outlined"
+                            color="primary"
+                          />
+                          <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                            {agent.position || "Rådgiver"}
                           </Typography>
-                        )}
-                      </Box>
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      {(agent.baseSalary || 0).toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    
-                    <TableCell align="right">
-                      {(agent.bonus || 0).toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    
-                    <TableCell align="center">
-                      {agent.sickLeave || "-"}
-                    </TableCell>
-                    
-                    <TableCell align="center">
-                      <Tooltip title="Klikk for å endre">
-                        <Chip
-                          label={agent.applyFivePercent ? 'Ja' : 'Nei'}
-                          color={agent.applyFivePercent ? 'primary' : 'default'}
-                          size="small"
-                          onClick={() => handleToggleFivePercent(agent, agent.applyFivePercent)}
-                          sx={{ cursor: 'pointer' }}
-                        />
-                      </Tooltip>
-                    </TableCell>
-                    
-                    <TableCell align="center">
-                      <IconButton 
-                        size="small" 
-                        color="primary" 
-                        onClick={() => handleOpenEditDialog(agent)}
-                      >
-                        <Edit fontSize="small" />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">
+                        {(agent.skadePremium || 0).toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="right">
+                        {(agent.livPremium || 0).toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                          {agent.skadeCommissionRate || "-"}%
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                          {agent.livCommissionRate || "-"}%
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">
+                        {(agent.tjenestetorgetDeduction || 0).toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="right">
+                        {(agent.byttDeduction || 0).toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="right">
+                        {(agent.otherDeductions || 0).toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
+                        {commissionDetails.totalCommission.toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="right">
+                        {(agent.baseSalary || 0).toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="right">
+                        {(agent.bonus || 0).toLocaleString('nb-NO')} kr
+                      </TableCell>
+                      <TableCell align="center">
+                        {agent.sickLeave || "-"}
+                      </TableCell>
+                      <TableCell align="center">
+                        <Tooltip title="Klikk for å endre">
+                          <Chip
+                            label={agent.applyFivePercent ? 'Ja' : 'Nei'}
+                            color={agent.applyFivePercent ? 'primary' : 'default'}
+                            size="small"
+                            onClick={() => handleToggleFivePercent(agent, agent.applyFivePercent)}
+                            sx={{ cursor: 'pointer' }}
+                          />
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell align="center">
+                        <IconButton 
+                          size="small" 
+                          color="primary" 
+                          onClick={() => handleOpenEditDialog(agent)}
+                        >
+                          <Edit fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Box>
       
       <Dialog open={editDialogOpen} onClose={handleCloseEditDialog} maxWidth="md" fullWidth>
         <DialogTitle>
@@ -589,13 +675,11 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
               {saveError}
             </Alert>
           )}
-          
           {editingAgent && (
             <Box sx={{ p: 2 }}>
               <Typography variant="subtitle1" gutterBottom>
                 Lønnstrinn: {editingAgent.salaryModelName}
               </Typography>
-              
               <Box sx={{ mt: 3 }}>
                 <Typography variant="subtitle2" gutterBottom>Provisjonssatser</Typography>
                 <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
@@ -623,7 +707,6 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                   />
                 </Box>
               </Box>
-              
               <Box sx={{ mt: 3 }}>
                 <Typography variant="subtitle2" gutterBottom>Anbudstrekk</Typography>
                 <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
@@ -662,7 +745,6 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                   />
                 </Box>
               </Box>
-              
               <Box sx={{ mt: 3 }}>
                 <Typography variant="subtitle2" gutterBottom>Lønn og tillegg</Typography>
                 <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
@@ -690,7 +772,6 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                   />
                 </Box>
               </Box>
-              
               <Box sx={{ mt: 3 }}>
                 <Typography variant="subtitle2" gutterBottom>Annen informasjon</Typography>
                 <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
@@ -705,7 +786,6 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                   />
                 </Box>
               </Box>
-              
               <Box sx={{ mt: 3 }}>
                 <FormControlLabel
                   control={
@@ -720,7 +800,6 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                   }
                   label={`Anvend 5% trekk (${editValues.applyFivePercent ? 'Ja' : 'Nei'})`}
                 />
-                
                 {editingAgent && editValues.applyFivePercent && (
                   <Alert severity="info" sx={{ mt: 1, fontSize: '0.85rem' }}>
                     5% trekket utgjør ca. {(
@@ -733,7 +812,6 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
             </Box>
           )}
         </DialogContent>
-        
         <DialogActions>
           <Button onClick={handleCloseEditDialog} startIcon={<Cancel />} disabled={saveLoading}>
             Avbryt
