@@ -616,7 +616,12 @@ function AccountingExport() {
   };
 
   return (
-    <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
+    <Box sx={{ 
+      p: 3, 
+      backgroundColor: "#f5f5f5", 
+      minHeight: "100vh",
+      pt: { xs: 10, sm: 11, md: 12 } // Add padding-top to push content below navigation
+    }}>
       <NavigationMenu />
       
       <Paper elevation={2} sx={{ p: 3, borderRadius: 2, mb: 3 }}>

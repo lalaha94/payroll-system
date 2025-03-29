@@ -51,6 +51,7 @@ import {
   ToggleOff,
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import { useLocation } from 'react-router-dom';
 import NavigationMenu from './components/NavigationMenu';
 import { format, differenceInMonths } from 'date-fns';
 
@@ -78,6 +79,7 @@ const calculateMonthsDiff = (startDate, endDate = new Date()) => {
 
 function Employees() {
   const theme = useTheme();
+  const location = useLocation();
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -113,11 +115,13 @@ function Employees() {
   const [selectedDepartment, setSelectedDepartment] = useState("Alle");
   
   useEffect(() => {
+    console.log("Employees component mounted/updated, fetching data...");
     fetchCurrentUser();
-  }, []);
+  }, [location.pathname]);
 
   const fetchCurrentUser = async () => {
     try {
+      setLoading(true);
       const session = await supabase.auth.getSession();
       const user = session.data?.session?.user;
       
@@ -500,7 +504,12 @@ function Employees() {
   });
 
   return (
-    <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
+    <Box sx={{ 
+      p: 3, 
+      backgroundColor: "#f5f5f5", 
+      minHeight: "100vh",
+      pt: { xs: 10, sm: 11, md: 12 } // Add padding-top to push content below navigation
+    }}>
       <NavigationMenu />
       
       <MuiGrid container spacing={3}>

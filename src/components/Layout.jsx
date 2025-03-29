@@ -71,8 +71,8 @@ const Layout = ({ children }) => {
           className="main-content"
           sx={{
             flexGrow: 1,
-            pt: { xs: 9, sm: 10 }, // Padding top to account for fixed header
-            pl: { xs: 2, sm: 3, md: sidebarOpen ? 35 : 10 }, // Padding left to account for sidebar
+            pt: { xs: 9, sm: 10, md: 11 }, // Increased padding to push content below the navigation
+            pl: { xs: 2, sm: 3, md: sidebarOpen ? 35 : 10 },
             pr: { xs: 2, sm: 3 },
             pb: 4,
             transition: theme.transitions.create(['padding'], {

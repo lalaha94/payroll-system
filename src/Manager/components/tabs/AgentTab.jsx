@@ -22,7 +22,9 @@ import {
   FormControlLabel,
   Switch,
   CircularProgress,
-  Alert
+  Alert,
+  Paper,
+  Divider
 } from '@mui/material';
 import { 
   Search, 
@@ -33,7 +35,7 @@ import {
   Cancel,
   Warning
 } from '@mui/icons-material';
-import { useTheme } from '@mui/material/styles';
+import { useTheme, alpha } from '@mui/material/styles';
 import { format, differenceInMonths } from 'date-fns';
 import { supabase } from '../../../supabaseClient';
 
@@ -262,7 +264,7 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                 tjenestetorgetDeduction: parseFloat(editValues.tjenestetorgetDeduction) || 0,
                 byttDeduction: parseFloat(editValues.byttDeduction) || 0,
                 otherDeductions: parseFloat(editValues.otherDeductions) || 0
-              }).totalCommission
+              }).total
             } 
           : agent
       );
@@ -363,27 +365,30 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
   };
 
   const calculateTotalCommission = (agent) => {
-    const skadeCommission = agent.skadePremium * (agent.skadeCommissionRate || 0) / 100;
-    const livCommission = agent.livPremium * (agent.livCommissionRate || 0) / 100;
+    const skadeCommission = agent.skadePremium * (agent.skadeCommissionRate / 100) || 0;
+    const livCommission = agent.livPremium * (agent.livCommissionRate / 100) || 0;
     
-    const baseCommission = skadeCommission + livCommission;
+    const totalBeforeDeductions = skadeCommission + livCommission;
     
-    const fivePercentDeduction = agent.applyFivePercent ? baseCommission * 0.05 : 0;
+    const tjenestetorgetDeduction = parseFloat(agent.tjenestetorgetDeduction) || 0;
+    const byttDeduction = parseFloat(agent.byttDeduction) || 0;
+    const otherDeductions = parseFloat(agent.otherDeductions) || 0;
     
-    const otherDeductions = 
-      (agent.tjenestetorgetDeduction || 0) + 
-      (agent.byttDeduction || 0) + 
-      (agent.otherDeductions || 0);
+    const fivePercentDeduction = agent.applyFivePercent ? totalBeforeDeductions * 0.05 : 0;
     
-    const totalCommission = baseCommission - fivePercentDeduction - otherDeductions;
+    const totalCommission = totalBeforeDeductions - tjenestetorgetDeduction - byttDeduction - otherDeductions - fivePercentDeduction;
     
     return {
-      livCommission,
-      skadeCommission,
-      baseCommission,
-      fivePercentDeduction,
-      otherDeductions,
-      totalCommission
+      total: totalCommission,
+      details: {
+        skadeCommission,
+        livCommission,
+        totalBeforeDeductions,
+        tjenestetorgetDeduction,
+        byttDeduction, 
+        otherDeductions,
+        fivePercentDeduction
+      }
     };
   };
 
@@ -435,156 +440,67 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
           zIndex: 1,
         }
       }}>
-        <TableContainer 
-          sx={{ 
-            maxHeight: 600,
-            overflow: 'auto',
-            scrollbarWidth: 'thin',
-            '&::-webkit-scrollbar': {
-              width: '8px',
-              height: '8px',
-            },
-            '&::-webkit-scrollbar-track': {
-              backgroundColor: 'rgba(0,0,0,0.05)',
-              borderRadius: '8px',
-            },
-            '&::-webkit-scrollbar-thumb': {
-              backgroundColor: 'rgba(0,0,0,0.15)',
-              borderRadius: '8px',
-              '&:hover': {
-                backgroundColor: 'rgba(0,0,0,0.25)',
-              },
-            },
-          }}
-        >
-          <Table 
-            stickyHeader 
-            size="small"
-            sx={{ 
-              tableLayout: 'fixed',
-              '& .MuiTableCell-root': {
-                paddingTop: '8px',
-                paddingBottom: '8px',
-              },
-              '& .MuiTableCell-sizeSmall': {
-                paddingTop: '6px',
-                paddingBottom: '6px',
-              }
-            }}
-          >
+        <TableContainer component={Paper} sx={{ mt: 2, overflowX: 'auto' }}>
+          <Table sx={{ tableLayout: 'fixed', minWidth: 1800 }} stickyHeader>
             <TableHead>
-              <TableRow>
-                <TableCell onClick={() => requestSort('ranking')} sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    #
-                    {getSortIcon('ranking')}
-                  </Box>
-                </TableCell>
-                <TableCell onClick={() => requestSort('name')} sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    Navn
-                    {getSortIcon('name')}
-                  </Box>
-                </TableCell>
-                <TableCell onClick={() => requestSort('salaryModelName')} sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    Lønnstrinn / Stilling
-                    {getSortIcon('salaryModelName')}
-                  </Box>
-                </TableCell>
-                <TableCell onClick={() => requestSort('skadePremium')} align="right" sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                    Skadesalg
-                    {getSortIcon('skadePremium')}
-                  </Box>
-                </TableCell>
-                <TableCell onClick={() => requestSort('livPremium')} align="right" sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                    Livsalg
-                    {getSortIcon('livPremium')}
-                  </Box>
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                  Skadeprovisjon %
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                  Livprovisjon %
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                  Anbud Tjenestetorget
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                  Anbud Bytt
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                  Andre anbud
-                </TableCell>
-                <TableCell onClick={() => requestSort('totalCommission')} align="right" sx={{ cursor: 'pointer', fontWeight: 'bold' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                    Total provisjon
-                    {getSortIcon('totalCommission')}
-                  </Box>
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                  Fastlønn
-                </TableCell>
-                <TableCell align="right" sx={{ fontWeight: 'bold' }}>
-                  Bonus
-                </TableCell>
-                <TableCell align="center" sx={{ fontWeight: 'bold' }}>
-                  Egenmelding
-                </TableCell>
-                <TableCell align="center" sx={{ fontWeight: 'bold' }}>
-                  5% trekk
-                </TableCell>
-                <TableCell align="center" sx={{ fontWeight: 'bold' }}>
-                  Handlinger
-                </TableCell>
+              <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.05) }}>
+                <TableCell sx={{ 
+                  width: 40, 
+                  p: 1.5, 
+                  fontSize: '0.8rem', 
+                  fontWeight: 'bold', 
+                  whiteSpace: 'nowrap',
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 3,
+                  backgroundColor: alpha(theme.palette.primary.main, 0.05),
+                }}>#</TableCell>
+                <TableCell sx={{ 
+                  width: 180, 
+                  p: 1.5, 
+                  fontSize: '0.8rem', 
+                  fontWeight: 'bold', 
+                  whiteSpace: 'nowrap',
+                  backgroundColor: alpha(theme.palette.primary.main, 0.05),
+                  borderRight: '1px solid rgba(224, 224, 224, 1)'
+                }}>Navn</TableCell>
+                <TableCell sx={{ width: 150, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Lønnstrinn / Stilling</TableCell>
+                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Skadesalg</TableCell>
+                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Livsalg</TableCell>
+                <TableCell sx={{ width: 130, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Skadeprovisjon %</TableCell>
+                <TableCell sx={{ width: 130, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Livprovisjon %</TableCell>
+                <TableCell sx={{ width: 160, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Anbud Tjenestetorget</TableCell>
+                <TableCell sx={{ width: 120, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Anbud Bytt</TableCell>
+                <TableCell sx={{ width: 120, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Andre anbud</TableCell>
+                <TableCell sx={{ width: 130, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Total provisjon</TableCell>
+                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Fastlønn</TableCell>
+                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Bonus</TableCell>
+                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Egenmelding</TableCell>
+                <TableCell sx={{ width: 90, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>5% trekk</TableCell>
+                <TableCell sx={{ width: 100, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Handlinger</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {sortedAgents().length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={16} align="center">
-                    Ingen agenter funnet
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sortedAgents().map(agent => {
+              {sortedAgents().length > 0 ? (
+                sortedAgents().map((agent, index) => {
                   const commissionDetails = calculateTotalCommission(agent);
                   return (
-                    <TableRow key={agent.id} hover>
-                      <TableCell>
-                        <Chip 
-                          label={agent.ranking} 
-                          size="small" 
-                          color={
-                            agent.ranking === 1 ? "success" :
-                            agent.ranking === 2 ? "primary" :
-                            agent.ranking === 3 ? "secondary" : 
-                            "default"
-                          }
-                          sx={{ 
-                            minWidth: '30px', 
-                            fontWeight: 'bold',
-                            ...(agent.ranking <= 3 ? { color: 'white' } : {})
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Avatar sx={{ 
-                            width: 32, 
-                            height: 32, 
-                            mr: 1, 
-                            bgcolor: agent.ranking <= 3 
-                              ? CHART_COLORS[agent.ranking - 1] 
-                              : '#bdbdbd'
-                          }}>
-                            {agent.name.substring(0, 1)}
-                          </Avatar>
-                          {agent.name}
-                        </Box>
+                    <TableRow key={agent.agent_id || index} hover>
+                      <TableCell>{index + 1}</TableCell>
+                      <TableCell sx={{ 
+                        whiteSpace: 'nowrap',
+                        position: 'sticky',
+                        left: 0,
+                        zIndex: 1,
+                        backgroundColor: 'background.paper',
+                        borderRight: '1px solid rgba(224, 224, 224, 1)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        maxWidth: 180
+                      }}>
+                        <Tooltip title={agent.name}>
+                          <span>{agent.name}</span>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         <Box>
@@ -624,8 +540,32 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                       <TableCell align="right">
                         {(agent.otherDeductions || 0).toLocaleString('nb-NO')} kr
                       </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
-                        {commissionDetails.totalCommission.toLocaleString('nb-NO')} kr
+                      <TableCell sx={{ 
+                        fontWeight: 'bold', 
+                        color: theme.palette.success.main,
+                        whiteSpace: 'nowrap'
+                      }}>
+                        <Tooltip title={
+                          agent.applyFivePercent ? 
+                          <React.Fragment>
+                            <Typography variant="subtitle2">Beregning av provisjon:</Typography>
+                            <Typography variant="body2">
+                              Skade: {commissionDetails.details.skadeCommission.toLocaleString('nb-NO')} kr<br />
+                              Liv: {commissionDetails.details.livCommission.toLocaleString('nb-NO')} kr<br />
+                              <b>Sum før trekk: {commissionDetails.details.totalBeforeDeductions.toLocaleString('nb-NO')} kr</b><br />
+                              <Divider sx={{ my: 1 }} />
+                              Tjenestetorget: -{commissionDetails.details.tjenestetorgetDeduction.toLocaleString('nb-NO')} kr<br />
+                              Bytt: -{commissionDetails.details.byttDeduction.toLocaleString('nb-NO')} kr<br />
+                              Andre trekk: -{commissionDetails.details.otherDeductions.toLocaleString('nb-NO')} kr<br />
+                              5% trekk: -{commissionDetails.details.fivePercentDeduction.toLocaleString('nb-NO')} kr<br />
+                              <Divider sx={{ my: 1 }} />
+                              <b>Total provisjon: {commissionDetails.total.toLocaleString('nb-NO')} kr</b>
+                            </Typography>
+                          </React.Fragment>
+                          : ""
+                        } arrow placement="left">
+                          <span>{commissionDetails.total.toLocaleString('nb-NO')} kr</span>
+                        </Tooltip>
                       </TableCell>
                       <TableCell align="right">
                         {(agent.baseSalary || 0).toLocaleString('nb-NO')} kr
@@ -659,6 +599,12 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                     </TableRow>
                   );
                 })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={16} align="center">
+                    Ingen agenter funnet for dette kontoret
+                  </TableCell>
+                </TableRow>
               )}
             </TableBody>
           </Table>

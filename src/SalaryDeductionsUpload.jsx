@@ -413,7 +413,12 @@ function SalaryDeductionsUpload() {
   const deductionTypes = [...new Set(deductions.map(d => d.type))].filter(Boolean);
 
   return (
-    <Box sx={{ p: 3, backgroundColor: "#f5f5f5", minHeight: "100vh" }}>
+    <Box sx={{ 
+      p: 3, 
+      backgroundColor: "#f5f5f5", 
+      minHeight: "100vh",
+      pt: { xs: 10, sm: 11, md: 12 } // Add padding-top to push content below navigation
+    }}>
       <NavigationMenu />
 
       <Grid container spacing={3}>

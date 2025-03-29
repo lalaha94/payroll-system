@@ -145,6 +145,15 @@ function NavigationMenu() {
     }
   };
 
+  const handleNavigation = (path) => {
+    // Always force a refresh when navigating to Employees page
+    if (path === '/employees' || currentPath === path) {
+      console.log("Forcing refresh for path:", path);
+      window.location.href = path; // Use direct navigation instead of history push
+      return;
+    }
+  };
+
   const baseNavIconSize = { fontSize: theme.typography.pxToRem(20) };
   const adminNavItems = [
     {
@@ -189,6 +198,7 @@ function NavigationMenu() {
       label: 'Ansatte',
       icon: <People sx={baseNavIconSize} />,
     },
+    // Accounting export removed - only for admins now
   ];
   const userNavItems = [
     {
@@ -218,6 +228,7 @@ function NavigationMenu() {
           width: '100%',
           zIndex: theme.zIndex.drawer + 1,
           boxShadow: 'none',
+          height: { xs: '70px', sm: '75px' }, // Explicitly set height
         }}
       >
         <Container maxWidth="xl">
@@ -264,6 +275,7 @@ function NavigationMenu() {
                     to={item.path}
                     size="medium"
                     startIcon={item.icon}
+                    onClick={() => handleNavigation(item.path)}
                     sx={{
                       fontFamily: 'inherit',
                       color: isCurrent(item.path)

@@ -52,7 +52,7 @@ html, body {
 
 /* Main content padding to account for fixed header */
 .main-content {
-  padding-top: 76px; 
+  padding-top: 90px; /* Increased padding to ensure content appears below the navigation */
   min-height: 100vh;
 }
 

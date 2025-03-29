@@ -56,6 +56,12 @@ const Sidebar = ({ userRole = 'user' }) => {
     });
   };
 
+  const handleNavigation = (path) => {
+    if (currentPath === path) {
+      window.location.reload();
+    }
+  };
+
   const adminNavItems = [
     { path: '/sales-dashboard', label: 'Dashboard', icon: <Dashboard /> },
     { path: '/employees', label: 'Ansatte', icon: <People /> },
@@ -66,8 +72,8 @@ const Sidebar = ({ userRole = 'user' }) => {
   ];
   
   const managerNavItems = [
-    { path: '/office-dashboard', label: 'Kontor', icon: <Business /> },  // Changed from '/manager-dashboard' to '/office-dashboard'
-    { path: '/employees', label: 'Ansatte', icon: <People /> },
+    { path: '/office-dashboard', label: 'Kontor', icon: <Business /> },  
+    { path: '/employees', label: 'Ansatte', icon: <People /> }
   ];
   
   const userNavItems = [
@@ -81,6 +87,28 @@ const Sidebar = ({ userRole = 'user' }) => {
       setOpen(!open);
     }
   };
+
+  const renderNavItem = (item) => (
+    <ListItemButton
+      key={item.path}
+      component={Link}
+      to={item.path}
+      onClick={() => handleNavigation(item.path)}
+      selected={currentPath === item.path}
+      sx={{ 
+        pl: 4,
+        bgcolor: currentPath === item.path 
+          ? alpha(theme.palette.primary.main, 0.1) 
+          : 'transparent',
+        '&:hover': {
+          bgcolor: alpha(theme.palette.primary.main, 0.05),
+        },
+      }}
+    >
+      <ListItemIcon>{item.icon}</ListItemIcon>
+      <ListItemText primary={item.label} />
+    </ListItemButton>
+  );
 
   const drawer = (
     <>
@@ -110,26 +138,7 @@ const Sidebar = ({ userRole = 'user' }) => {
             
             <Collapse in={expandedSections.admin} timeout="auto" unmountOnExit>
               <List component="div" disablePadding>
-                {adminNavItems.map((item) => (
-                  <ListItemButton
-                    key={item.path}
-                    component={Link}
-                    to={item.path}
-                    selected={currentPath === item.path}
-                    sx={{ 
-                      pl: 4,
-                      bgcolor: currentPath === item.path 
-                        ? alpha(theme.palette.primary.main, 0.1) 
-                        : 'transparent',
-                      '&:hover': {
-                        bgcolor: alpha(theme.palette.primary.main, 0.05),
-                      },
-                    }}
-                  >
-                    <ListItemIcon>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.label} />
-                  </ListItemButton>
-                ))}
+                {adminNavItems.map(renderNavItem)}
               </List>
             </Collapse>
           </>
@@ -147,26 +156,7 @@ const Sidebar = ({ userRole = 'user' }) => {
             
             <Collapse in={expandedSections.manager} timeout="auto" unmountOnExit>
               <List component="div" disablePadding>
-                {managerNavItems.map((item) => (
-                  <ListItemButton
-                    key={item.path}
-                    component={Link}
-                    to={item.path}
-                    selected={currentPath === item.path}
-                    sx={{ 
-                      pl: 4,
-                      bgcolor: currentPath === item.path 
-                        ? alpha(theme.palette.primary.main, 0.1) 
-                        : 'transparent',
-                      '&:hover': {
-                        bgcolor: alpha(theme.palette.primary.main, 0.05),
-                      },
-                    }}
-                  >
-                    <ListItemIcon>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.label} />
-                  </ListItemButton>
-                ))}
+                {managerNavItems.map(renderNavItem)}
               </List>
             </Collapse>
           </>
@@ -182,33 +172,13 @@ const Sidebar = ({ userRole = 'user' }) => {
         
         <Collapse in={expandedSections.user} timeout="auto" unmountOnExit>
           <List component="div" disablePadding>
-            {userNavItems.map((item) => (
-              <ListItemButton
-                key={item.path}
-                component={Link}
-                to={item.path}
-                selected={currentPath === item.path}
-                sx={{ 
-                  pl: 4,
-                  bgcolor: currentPath === item.path 
-                    ? alpha(theme.palette.primary.main, 0.1) 
-                    : 'transparent',
-                  '&:hover': {
-                    bgcolor: alpha(theme.palette.primary.main, 0.05),
-                  },
-                }}
-              >
-                <ListItemIcon>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} />
-              </ListItemButton>
-            ))}
+            {userNavItems.map(renderNavItem)}
           </List>
         </Collapse>
       </List>
     </>
   );
 
-  // For desktop: permanent drawer that can be expanded/collapsed
   const desktopDrawer = (
     <Drawer
       variant="permanent"
@@ -226,9 +196,9 @@ const Sidebar = ({ userRole = 'user' }) => {
           borderRight: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
           bgcolor: alpha(theme.palette.background.paper, 0.95),
           backdropFilter: 'blur(10px)',
-          boxShadow: '0px 2px 10px rgba(0, 0, 0, 0.05)`,
+          boxShadow: '0px 2px 10px rgba(0, 0, 0, 0.05)', // Fixed: changed backtick to single quote
           height: '100%',
-          marginTop: '75px', // Adjust to match the top navigation bar height
+          marginTop: '75px',
           paddingTop: '1rem'
         },
       }}
@@ -238,14 +208,13 @@ const Sidebar = ({ userRole = 'user' }) => {
     </Drawer>
   );
 
-  // For mobile: temporary drawer
   const mobileDrawer = (
     <Drawer
       variant="temporary"
       open={mobileOpen}
       onClose={handleDrawerToggle}
       ModalProps={{
-        keepMounted: true, // Better mobile performance
+        keepMounted: true,
       }}
       sx={{
         display: { xs: 'block', md: 'none' },
@@ -263,10 +232,8 @@ const Sidebar = ({ userRole = 'user' }) => {
 
   return (
     <>
-      {/* Drawer for mobile */}
       {isMobile ? mobileDrawer : desktopDrawer}
       
-      {/* Mobile menu toggle */}
       {isMobile && (
         <Box 
           sx={{ 
