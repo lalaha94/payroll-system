@@ -15,4 +15,23 @@ export default defineConfig({
       overlay: false, // Deaktiver feilmeldingsoverlay hvis ønskelig
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor': [
+            'react',
+            'react-dom',
+            'react-router-dom',
+            '@mui/material',
+            '@mui/icons-material',
+            '@supabase/supabase-js'
+          ],
+          'charts': ['recharts'],
+          'utils': ['date-fns', 'lodash', 'xlsx']
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000
+  }
 });
