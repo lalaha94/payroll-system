@@ -29,7 +29,8 @@
     "react-router-dom": "^6.22.0",
     "recharts": "^2.12.0",
     "supabase": "^1.136.3",
-    "tw-animate-css": "^1.2.4"
+    "tw-animate-css": "^1.2.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^18.2.48",
