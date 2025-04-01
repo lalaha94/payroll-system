@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'; // Add useRef
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -29,38 +29,52 @@ import {
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 
-const MonthlyApprovalsTab = ({
+function MonthlyApprovalsTab({
   agentPerformance,
   showApproved,
   setShowApproved,
   selectedMonth,
   refreshingApprovals,
   fetchMonthlyApprovals,
+  setRefreshingApprovals, // Add this prop
   openBatchApproval,
   openRevocationDialog,
   debugApprovalStatus,
   approvalSuccess,
   setApprovalSuccess,
+  monthlyApprovals,
   CHART_COLORS
-}) => {
+}) {
   const theme = useTheme();
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "totalPremium", direction: "desc" });
+  const [verifiedAgents, setVerifiedAgents] = useState({});
   
-  // Add a ref to track initial mount
   const initialRender = useRef(true);
   
-  // Fix the infinite loop by only fetching when the component mounts or when showApproved changes manually
   useEffect(() => {
-    // Skip the first render since data is loaded by parent component
     if (initialRender.current) {
       initialRender.current = false;
       return;
     }
     
     console.log("showApproved changed manually to:", showApproved);
-    fetchMonthlyApprovals();
-  }, [showApproved]); // Only depend on showApproved
+    if (showApproved !== undefined) {
+      fetchMonthlyApprovals();
+    }
+  }, [showApproved]);
+
+  useEffect(() => {
+    if (approvalSuccess) {
+      fetchMonthlyApprovals();
+      
+      const timer = setTimeout(() => {
+        setApprovalSuccess(null);
+      }, 5000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [approvalSuccess, fetchMonthlyApprovals, setApprovalSuccess]);
   
   const requestSort = (key) => {
     let direction = 'asc';
@@ -75,35 +89,126 @@ const MonthlyApprovalsTab = ({
     return sortConfig.direction === 'asc' ? <ArrowUpward fontSize="small" /> : <ArrowDownward fontSize="small" />;
   };
 
-  // Add debugging for the Tobias issue
+  const forceFullRefresh = useCallback(async () => {
+    console.log("🔄 Performing full refresh of approval data...");
+    setRefreshingApprovals(true);
+    
+    try {
+      // Hent alle godkjenninger for valgt måned
+      const { data: allApprovals, error } = await supabase
+        .from('monthly_commission_approvals')
+        .select('*')
+        .eq('month_year', selectedMonth);
+      
+      if (error) {
+        console.error("Error fetching approvals:", error);
+        return;
+      }
+      
+      console.log(`Found ${allApprovals.length} total approvals in database`);
+      
+      // Filtrer ut gyldige godkjenninger (godkjent og ikke tilbakekalt)
+      const validApprovals = allApprovals.filter(a => 
+        a.approved === true && a.revoked !== true
+      );
+      
+      console.log(`Found ${validApprovals.length} valid approvals (approved=true, revoked≠true)`);
+      
+      // Oppdater verifiedAgents med de gyldige godkjenningene
+      const verifiedMap = {};
+      validApprovals.forEach(approval => {
+        verifiedMap[approval.agent_name] = {
+          isApproved: true,
+          approvalRecord: approval
+        };
+      });
+      
+      setVerifiedAgents(verifiedMap);
+      
+      // Oppdater agentPerformance med de nye godkjenningsstatusene
+      if (agentPerformance) {
+        const updatedAgentPerformance = agentPerformance.map(agent => {
+          const approval = validApprovals.find(a => a.agent_name === agent.name);
+          if (approval) {
+            return {
+              ...agent,
+              isApproved: true,
+              approvalRecord: approval,
+              approvalStatus: 'approved'
+            };
+          }
+          return {
+            ...agent,
+            isApproved: false,
+            approvalRecord: null,
+            approvalStatus: 'pending'
+          };
+        });
+        
+        // Kall parent-komponenten for å oppdatere agentPerformance
+        if (typeof updateAgentPerformance === 'function') {
+          updateAgentPerformance(updatedAgentPerformance);
+        }
+      }
+      
+      await fetchMonthlyApprovals();
+      
+      setApprovalSuccess("Database refresh complete");
+      setTimeout(() => setApprovalSuccess(null), 3000);
+    } catch (e) {
+      console.error("Error in forceFullRefresh:", e);
+    } finally {
+      setRefreshingApprovals(false);
+    }
+  }, [selectedMonth, fetchMonthlyApprovals, setRefreshingApprovals, agentPerformance, updateAgentPerformance]);
+
+  useEffect(() => {
+    if (selectedMonth) {
+      console.log("Initializing approval data...");
+      forceFullRefresh();
+    }
+  }, [selectedMonth, forceFullRefresh]);
+
+  const approvedAgents = React.useMemo(() => {
+    const approvedSet = new Set();
+    
+    if (monthlyApprovals && monthlyApprovals.length > 0) {
+      monthlyApprovals.forEach(approval => {
+        if (approval.approved === true && approval.revoked !== true) {
+          approvedSet.add(approval.agent_name);
+        }
+      });
+    }
+    
+    console.log(`Created Set of ${approvedSet.size} approved agent names`);
+    return approvedSet;
+  }, [monthlyApprovals]);
+
   const sortedAgents = () => {
     if (!agentPerformance || agentPerformance.length === 0) {
       return [];
     }
 
-    // Log for debugging
-    console.log("Full agent performance data:", agentPerformance);
-    console.log("Current showApproved setting:", showApproved);
+    const searchFiltered = agentPerformance.filter(agent => 
+      agent.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
     
-    // Check specifically for Tobias
-    const hasTobias = agentPerformance.some(agent => agent.name === "Tobias Magnussen");
-    console.log("Tobias Magnussen found in agentPerformance:", hasTobias);
-    
-    // First filter agents by name search term
-    const filteredAgents = agentPerformance.filter(agent => {
-      // Filter by search term
-      const matchesSearch = agent.name.toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesSearch;
+    const filteredAgents = searchFiltered.filter(agent => {
+      const isActuallyApproved = approvedAgents.has(agent.name) || agent.isApproved === true;
+      const hasCommission = (
+        (agent.totalPremium > 0) ||  
+        (agent.commission > 0) || 
+        (agent.totalCommission > 0) || 
+        (agent.skadePremium > 0 || agent.livPremium > 0)
+      );
+      
+      if (isActuallyApproved) {
+        return showApproved;
+      }
+      
+      return true;
     });
     
-    // Check Tobias in filtered agents
-    const hasTobiasAfterFilter = filteredAgents.some(agent => agent.name === "Tobias Magnussen");
-    console.log("Tobias Magnussen found after search filter:", hasTobiasAfterFilter);
-    
-    // Make sure we don't filter out approved agents when showApproved is true
-    console.log("Agents after search filter:", filteredAgents.length);
-    
-    // Apply the sort - don't filter by approval status here
     const sortedAgents = [...filteredAgents].sort((a, b) => {
       if (sortConfig.key === 'name') {
         return sortConfig.direction === 'asc' 
@@ -127,79 +232,95 @@ const MonthlyApprovalsTab = ({
         : bValue - aValue;
     });
     
-    // Check Tobias in final sorted list
-    const hasTobiasInFinal = sortedAgents.some(agent => agent.name === "Tobias Magnussen");
-    console.log("Tobias Magnussen found in final sorted list:", hasTobiasInFinal);
-    
-    // Log info for debugging
-    console.log(`Sorted agents (${sortedAgents.length}): ${sortedAgents.map(a => a.name).join(', ')}`);
-    
     return sortedAgents;
   };
 
-  // Get the sorted agents now so we can see what we're working with
-  const sortedAgentsList = sortedAgents();
-
-  // Modified function to calculate commission
   const calculateAgentApprovalData = (agent) => {
-    // Check if the agent already has calculated commission values
-    if (agent.totalCommission !== undefined) {
-      // Return the pre-calculated commission based on the AgentTab modifications
+    // Use already computed data from agentPerformance (from AgentTab)
+    return {
+      name: agent.name,
+      commission: agent.commission || 0,
+      isModified: agent.isModified || false,
+      modificationDetails: agent.modificationDetails || {}
+    };
+  };
+
+  const getAgentApprovalStatus = useCallback((agent) => {
+    if (!agent) {
       return {
-        name: agent.name,
-        commission: agent.totalCommission,
-        // Use already calculated values if available
-        isModified: agent.overriddenSkadeRate || agent.overriddenLivRate || agent.overriddenDeductions,
-        modificationDetails: {
-          skadeRate: agent.skadeCommissionRate,
-          livRate: agent.livCommissionRate,
-          tjenestetorget: agent.tjenestetorgetDeduction || 0,
-          bytt: agent.byttDeduction || 0,
-          other: agent.otherDeductions || 0,
-          applyFivePercent: agent.applyFivePercent
-        }
+        isApproved: false,
+        approvalRecord: null,
+        commission: 0,
+        showApprovalChip: false,
+        showWaitingChip: false,
+        showNoCommissionChip: true,
+        showApproveButton: false,
+        showControlButtons: false,
+        isModified: false
       };
     }
     
-    // Calculate from scratch if needed
-    const livCommission = agent.livPremium * (agent.livCommissionRate || 0) / 100;
-    const skadeCommission = agent.skadePremium * (agent.skadeCommissionRate || 0) / 100;
-    const baseCommission = livCommission + skadeCommission;
-    
-    // Apply deductions
-    const fivePercentDeduction = agent.applyFivePercent ? baseCommission * 0.05 : 0;
-    const otherDeductions = 
-      (agent.tjenestetorgetDeduction || 0) + 
-      (agent.byttDeduction || 0) + 
-      (agent.otherDeductions || 0);
-    
-    const totalCommission = baseCommission - fivePercentDeduction - otherDeductions;
+    // Sjekk både agent.isApproved og verifiedAgents
+    const isApproved = agent.isApproved === true || verifiedAgents[agent.name]?.isApproved === true;
+    const commission = agent.commission || 0;
+    const hasCommission = commission > 0;
     
     return {
-      name: agent.name,
-      commission: totalCommission,
-      isModified: agent.overriddenSkadeRate || agent.overriddenLivRate || agent.overriddenDeductions,
-      modificationDetails: {
-        skadeRate: agent.skadeCommissionRate,
-        livRate: agent.livCommissionRate,
-        tjenestetorget: agent.tjenestetorgetDeduction || 0,
-        bytt: agent.byttDeduction || 0,
-        other: agent.otherDeductions || 0,
-        applyFivePercent: agent.applyFivePercent
-      }
+      isApproved: isApproved,
+      approvalRecord: agent.approvalRecord || verifiedAgents[agent.name]?.approvalRecord || null,
+      commission: commission,
+      isModified: agent.isModified || false,
+      showApprovalChip: isApproved,
+      showWaitingChip: !isApproved && hasCommission,
+      showNoCommissionChip: !hasCommission,
+      showApproveButton: !isApproved && hasCommission,
+      showControlButtons: isApproved
     };
-  };
+  }, [verifiedAgents]);
 
-  // Add this function to prepare agent data before batch approval
-  const prepareAgentForApproval = (agent) => {
-    const approvalData = calculateAgentApprovalData(agent);
-    return {
-      ...agent,
-      commission: approvalData.commission,
-      isModified: approvalData.isModified,
-      modificationDetails: approvalData.modificationDetails
-    };
-  };
+  const handleOpenBatchApprovalClick = useCallback((agent) => {
+    try {
+      console.log("Opening batch approval for agent:", agent);
+      
+      // Make sure agent data has all required fields
+      if (!agent) {
+        console.error("Agent data is undefined");
+        return;
+      }
+      
+      // Calculate complete agent data for approval
+      const agentData = {
+        name: agent.name,
+        id: agent.id || agent.agentId,
+        agentId: agent.agentId || agent.id,
+        company: agent.agent_company || agent.company || managerData?.office,
+        commission: agent.commission || 0,
+        isModified: agent.isModified || false,
+        // Add premium data for calculation display
+        skadePremium: agent.skadePremium || 0,
+        livPremium: agent.livPremium || 0,
+        totalPremium: agent.totalPremium || 0,
+        // Add commission rates
+        skadeCommissionRate: agent.skadeCommissionRate || 0,
+        livCommissionRate: agent.livCommissionRate || 0,
+        // Include deductions
+        tjenestetorgetDeduction: agent.tjenestetorgetDeduction || 0,
+        byttDeduction: agent.byttDeduction || 0,
+        otherDeductions: agent.otherDeductions || 0,
+        // Include other adjustments
+        baseSalary: agent.baseSalary || 0,
+        bonus: agent.bonus || 0,
+        applyFivePercent: agent.applyFivePercent !== undefined ? agent.applyFivePercent : false
+      };
+      
+      console.log("Prepared agent data for approval:", agentData);
+      openBatchApproval(agentData);
+    } catch (error) {
+      console.error("Error in handleOpenBatchApprovalClick:", error);
+    }
+  }, [openBatchApproval, managerData]);
+
+  const sortedAgentsList = sortedAgents();
 
   return (
     <Box sx={{ p: 3 }}>
@@ -237,7 +358,7 @@ const MonthlyApprovalsTab = ({
           <Tooltip title="Oppdater godkjenningsstatus">
             <span>
               <IconButton 
-                onClick={fetchMonthlyApprovals}
+                onClick={forceFullRefresh}
                 disabled={refreshingApprovals}
                 color="primary"
               >
@@ -305,18 +426,20 @@ const MonthlyApprovalsTab = ({
                 <TableRow>
                   <TableCell colSpan={7} align="center">
                     {selectedMonth ? 
-                      'Ingen agenter med provisjon funnet for denne måneden. Prøv å klikk på oppdater-knappen ovenfor.' :
+                      (showApproved ? 
+                        'Ingen agenter funnet for denne måneden. Prøv å klikk på oppdater-knappen ovenfor.' :
+                        'Ingen agenter venter på godkjenning for denne måneden. Godkjente agenter er skjult. Du kan vise godkjente agenter ved å aktivere bryteren ovenfor.'
+                      ) :
                       'Velg en måned for å se agenter med provisjon.'
                     }
                   </TableCell>
                 </TableRow>
               ) : (
                 sortedAgentsList.map((agent, index) => {
-                  // Process agent data to include any modifications
-                  const agentWithApprovalData = prepareAgentForApproval(agent);
-                  const shouldShow = !agentWithApprovalData.isApproved || showApproved;
+                  const agentApprovalStatus = getAgentApprovalStatus(agent);
+                  const commission = agentApprovalStatus.commission || 0;
                   
-                  return shouldShow && (
+                  return (
                     <TableRow key={agent.id || `agent-${index}`} hover>
                       <TableCell>
                         <Chip 
@@ -361,17 +484,17 @@ const MonthlyApprovalsTab = ({
                       <TableCell align="right" sx={{ fontWeight: 'bold' }}>
                         {(agent.totalPremium || 0).toLocaleString('nb-NO')} kr
                       </TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 'bold', color: agentWithApprovalData.isModified ? theme.palette.warning.main : theme.palette.success.main }}>
-                        {agentWithApprovalData.commission.toLocaleString('nb-NO', { minimumFractionDigits: 2 })} kr
-                        {agentWithApprovalData.isModified && (
+                      <TableCell align="right" sx={{ fontWeight: 'bold', color: agentApprovalStatus.isModified ? theme.palette.warning.main : theme.palette.success.main }}>
+                        {commission.toLocaleString('nb-NO', { minimumFractionDigits: 2 })} kr
+                        {agentApprovalStatus.isModified && (
                           <Tooltip title="Provisjon er justert manuelt">
                             <Box component="span" sx={{ display: 'inline-block', ml: 1 }}>*</Box>
                           </Tooltip>
                         )}
                       </TableCell>
                       <TableCell align="center">
-                        {agent.isApproved ? (
-                          <Tooltip title={`Godkjent av: ${agent.approvalRecord?.approved_by || 'Ukjent'}`}>
+                        {agentApprovalStatus.showApprovalChip && (
+                          <Tooltip title={`Godkjent av: ${agentApprovalStatus.approvalRecord?.approved_by || 'Ukjent'}`}>
                             <Chip 
                               icon={<CheckCircle fontSize="small" />}
                               label="Godkjent"
@@ -379,13 +502,17 @@ const MonthlyApprovalsTab = ({
                               size="small"
                             />
                           </Tooltip>
-                        ) : agent.commission > 0 ? (
+                        )}
+                        
+                        {agentApprovalStatus.showWaitingChip && (
                           <Chip 
                             label="Venter" 
                             color="warning" 
                             size="small"
                           />
-                        ) : (
+                        )}
+                        
+                        {agentApprovalStatus.showNoCommissionChip && (
                           <Chip 
                             label="Ingen provisjon" 
                             color="default" 
@@ -394,16 +521,18 @@ const MonthlyApprovalsTab = ({
                         )}
                       </TableCell>
                       <TableCell align="center">
-                        {!agent.isApproved && agent.commission > 0 ? (
+                        {agentApprovalStatus.showApproveButton && (
                           <Button
                             variant="contained"
                             color="primary"
                             size="small"
-                            onClick={() => openBatchApproval(agent)}
+                            onClick={() => handleOpenBatchApprovalClick(agent)}
                           >
                             Godkjenn
                           </Button>
-                        ) : agent.isApproved && (
+                        )}
+                        
+                        {agentApprovalStatus.showControlButtons && (
                           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
                             <Tooltip title={agent.approvalRecord?.approval_comment || 'Ingen kommentar'}>
                               <IconButton size="small" color="info">
@@ -419,17 +548,15 @@ const MonthlyApprovalsTab = ({
                                 <Cancel fontSize="small" />
                               </IconButton>
                             </Tooltip>
-                            {process.env.NODE_ENV === 'development' && (
-                              <Tooltip title="Debug godkjenningsstatus">
-                                <IconButton 
-                                  size="small" 
-                                  color="default"
-                                  onClick={() => debugApprovalStatus(agent)}
-                                >
-                                  <Search fontSize="small" />
-                                </IconButton>
-                              </Tooltip>
-                            )}
+                            <Tooltip title="Debug godkjenningsstatus">
+                              <IconButton 
+                                size="small" 
+                                color="default"
+                                onClick={() => debugApprovalStatus(agent)}
+                              >
+                                <Search fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
                           </Box>
                         )}
                       </TableCell>
@@ -454,6 +581,6 @@ const MonthlyApprovalsTab = ({
       </TableContainer>
     </Box>
   );
-};
+}
 
 export default MonthlyApprovalsTab;

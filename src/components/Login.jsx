@@ -49,62 +49,66 @@ function Login() {
     try {
       console.log("Login - Full user data:", user);
       
-      // Check multiple possible metadata fields for role
-      let metadataRole = null;
-
-      if (user.user_metadata?.is_super_admin === true || user.user_metadata?.is_admin === true) {
-        metadataRole = 'admin';
-      } else if (user.user_metadata?.role) {
-        metadataRole = user.user_metadata.role;
-      }
-
-      if (metadataRole) {
-        console.log("Login - Role derived from metadata or admin flags:", metadataRole);
-        
-        // Redirect based on role
-        if (metadataRole === 'admin') {
-          navigate('/sales-dashboard');
-          return;
-        } else if (metadataRole === 'manager') {
-          navigate('/office-dashboard');
-          return;
-        } else {
-          navigate('/agent-dashboard');
-          return;
-        }
+      // Først sjekker vi for admin-rolle (høyest prioritet)
+      if (user?.user_metadata?.is_super_admin === true || 
+          user?.user_metadata?.is_admin === true || 
+          user?.user_metadata?.role === 'admin') {
+        console.log("Login - Admin role found in metadata");
+        navigate('/sales-dashboard');
+        return;
       }
       
-      console.log("Login - No role in metadata, checking database...");
+      // Så sjekker vi om brukeren er manager
+      if (user?.user_metadata?.role === 'manager') {
+        console.log("Login - Manager role found in metadata");
+        navigate('/office-dashboard');
+        return;
+      }
       
-      // Fallback to check the custom users table
+      // Så sjekker vi users-tabellen hvis metadata ikke ga noe resultat
       const { data: userData, error: userError } = await supabase
         .from('users')
         .select('role')
         .eq('email', user.email)
         .single();
-      
-      console.log("Login - Database user data:", userData, "Error:", userError);
-      
-      // Determine the user's role and redirect
-      if (!userError && userData?.role) {
-        const effectiveRole = userData.role;
-        console.log("Login - Role from database:", effectiveRole);
         
-        // Redirect based on role
-        if (effectiveRole === 'admin') {
+      if (!userError && userData?.role) {
+        if (userData.role === 'admin') {
+          console.log("Login - Admin role found in users table");
           navigate('/sales-dashboard');
-        } else if (effectiveRole === 'manager') {
+          return;
+        } else if (userData.role === 'manager') {
+          console.log("Login - Manager role found in users table");
           navigate('/office-dashboard');
-        } else {
-          navigate('/agent-dashboard');
+          return;
         }
-      } else {
-        console.log("Login - No role found, defaulting to agent dashboard");
-        // Default redirect
-        navigate('/agent-dashboard');
       }
+      
+      // Til slutt sjekker vi employees-tabellen
+      const { data: empData, error: empError } = await supabase
+        .from('employees')
+        .select('role')
+        .eq('email', user.email)
+        .single();
+        
+      if (!empError && empData?.role) {
+        if (empData.role === 'admin') {
+          console.log("Login - Admin role found in employees table");
+          navigate('/sales-dashboard');
+          return;
+        } else if (empData.role === 'manager') {
+          console.log("Login - Manager role found in employees table");
+          navigate('/office-dashboard');
+          return;
+        }
+      }
+      
+      // Default: vanlig bruker sendes til agent-dashbordet
+      console.log("Login - User role determined as agent, redirecting to agent dashboard");
+      navigate('/agent-dashboard');
     } catch (error) {
-      console.error("Error checking user role:", error);
+      console.error("Error in redirectBasedOnRole:", error);
+      // Failsafe: Send til agent-dashboard ved feil
       navigate('/agent-dashboard');
     }
   };
@@ -122,7 +126,9 @@ function Login() {
 
       if (error) throw error;
       
-      // Successful login
+      console.log("Login - Auth successful, user data:", data?.user);
+      
+      // Kjør redirectBasedOnRole med brukerdata
       redirectBasedOnRole(data.user);
     } catch (error) {
       console.error('Error logging in:', error);

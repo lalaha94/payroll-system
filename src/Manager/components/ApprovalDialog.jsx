@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -16,9 +16,12 @@ import {
   FormHelperText,
   AlertTitle,
 } from '@mui/material';
-import { Edit, Comment, CheckCircle } from '@mui/icons-material';
+import { Comment, CheckCircle } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 
+/**
+ * Dialog for godkjenning av månedsprovisjon
+ */
 const ApprovalDialog = ({
   open,
   onClose,
@@ -31,31 +34,73 @@ const ApprovalDialog = ({
   handleCommissionAdjustment,
   handleBatchApprove,
   approvalError,
-  batchApprovalLoading
+  batchApprovalLoading,
+  managerData,
+  setSuccess,
+  setError,
+  fetchApprovals,
 }) => {
   const theme = useTheme();
+
+  // Beregn total provisjon basert på agentens data
+  const calculateTotalProvision = (agent) => {
+    if (!agent) return { total: 0, details: {} };
+
+    const skadeCommission = (agent.skadePremium || 0) * ((agent.skadeCommissionRate || 0) / 100);
+    const livCommission = (agent.livPremium || 0) * ((agent.livCommissionRate || 0) / 100);
+    const totalBeforeDeductions = skadeCommission + livCommission;
+
+    const fivePercentDeduction = agent.applyFivePercent ? totalBeforeDeductions * 0.05 : 0;
+    const deductions =
+      fivePercentDeduction +
+      (agent.tjenestetorgetDeduction || 0) +
+      (agent.byttDeduction || 0) +
+      (agent.otherDeductions || 0);
+    const fixedSalary = agent.baseSalary || 0;
+    const bonus = agent.bonus || 0;
+
+    const total = totalBeforeDeductions - deductions + fixedSalary + bonus;
+
+    return {
+      total,
+      details: {
+        skadeCommission,
+        livCommission,
+        totalBeforeDeductions,
+        fivePercentDeduction,
+        tjenestetorgetDeduction: agent.tjenestetorgetDeduction || 0,
+        byttDeduction: agent.byttDeduction || 0,
+        otherDeductions: agent.otherDeductions || 0,
+        fixedSalary,
+        bonus,
+      },
+    };
+  };
+
+  // Når dialogen åpnes, initialiser batchAmount til den beregnede totalen
+  useEffect(() => {
+    if (open && selectedAgent) {
+      const { total } = calculateTotalProvision(selectedAgent);
+      setBatchAmount(total.toFixed(2));
+    }
+  }, [open, selectedAgent, setBatchAmount]);
 
   if (!selectedAgent) {
     return null;
   }
 
+  const { total, details } = calculateTotalProvision(selectedAgent);
+
   return (
-    <Dialog 
-      open={open} 
-      onClose={onClose}
-      maxWidth="md"
-      fullWidth
-    >
-      <DialogTitle>
-        Godkjenn månedsprovisjon
-      </DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
+      <DialogTitle>Godkjenn månedsprovisjon</DialogTitle>
       <DialogContent>
         {approvalError && (
           <Alert severity="error" sx={{ mb: 2 }}>
             {approvalError}
           </Alert>
         )}
-        
+
         <Grid container spacing={2} sx={{ mt: 1 }}>
           <Grid item xs={12}>
             <Typography variant="subtitle1" fontWeight="bold">
@@ -78,21 +123,29 @@ const ApprovalDialog = ({
                   <Box component="li">Livprovisjon: {selectedAgent.modificationDetails.livRate}%</Box>
                 )}
                 {selectedAgent.modificationDetails?.tjenestetorget > 0 && (
-                  <Box component="li">Tjenestetorget trekk: {selectedAgent.modificationDetails.tjenestetorget.toLocaleString('nb-NO')} kr</Box>
+                  <Box component="li">
+                    Tjenestetorget trekk: {selectedAgent.modificationDetails.tjenestetorget.toLocaleString('nb-NO')} kr
+                  </Box>
                 )}
                 {selectedAgent.modificationDetails?.bytt > 0 && (
-                  <Box component="li">Bytt trekk: {selectedAgent.modificationDetails.bytt.toLocaleString('nb-NO')} kr</Box>
+                  <Box component="li">
+                    Bytt trekk: {selectedAgent.modificationDetails.bytt.toLocaleString('nb-NO')} kr
+                  </Box>
                 )}
                 {selectedAgent.modificationDetails?.other > 0 && (
-                  <Box component="li">Andre trekk: {selectedAgent.modificationDetails.other.toLocaleString('nb-NO')} kr</Box>
+                  <Box component="li">
+                    Andre trekk: {selectedAgent.modificationDetails.other.toLocaleString('nb-NO')} kr
+                  </Box>
                 )}
                 {selectedAgent.modificationDetails?.applyFivePercent !== undefined && (
-                  <Box component="li">5% trekk: {selectedAgent.modificationDetails.applyFivePercent ? 'Ja' : 'Nei'}</Box>
+                  <Box component="li">
+                    5% trekk: {selectedAgent.modificationDetails.applyFivePercent ? 'Ja' : 'Nei'}
+                  </Box>
                 )}
               </Alert>
             </Grid>
           )}
-          
+
           <Grid item xs={6}>
             <Typography variant="body2" color="text.secondary">
               Total Premium:
@@ -101,23 +154,119 @@ const ApprovalDialog = ({
               {selectedAgent.totalPremium?.toLocaleString('nb-NO')} kr
             </Typography>
           </Grid>
-          
+
           <Grid item xs={6}>
             <Typography variant="body2" color="text.secondary">
               Beregnet Provisjon:
             </Typography>
             <Typography variant="body1" fontWeight="bold" color={theme.palette.success.main}>
-              {selectedAgent.commission.toFixed(2).toLocaleString('nb-NO')} kr
+              {total.toLocaleString('nb-NO')} kr
             </Typography>
           </Grid>
-          
+
           <Grid item xs={12}>
             <Divider sx={{ my: 1 }} />
             <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 2 }}>
-              Godkjenningsdetaljer
+              Beregningsdetaljer
             </Typography>
+            <Box sx={{ pl: 2, py: 1 }}>
+              <Grid container spacing={1}>
+                <Grid item xs={6}>
+                  <Typography variant="body2">Skadeprovisjon:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    {details.skadeCommission.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2">Livprovisjon:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    {details.livCommission.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 1 }} />
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2">Sum før trekk:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    {details.totalBeforeDeductions.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                {selectedAgent.applyFivePercent && (
+                  <>
+                    <Grid item xs={6}>
+                      <Typography variant="body2">5% trekk:</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" align="right">
+                        -{details.fivePercentDeduction.toLocaleString('nb-NO')} kr
+                      </Typography>
+                    </Grid>
+                  </>
+                )}
+                <Grid item xs={6}>
+                  <Typography variant="body2">Tjenestetorget trekk:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    -{details.tjenestetorgetDeduction.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2">Bytt trekk:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    -{details.byttDeduction.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2">Andre trekk:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    -{details.otherDeductions.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2">Fastlønn:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    +{details.fixedSalary.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2">Bonus:</Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="body2" align="right">
+                    +{details.bonus.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 1 }} />
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle1" fontWeight="bold">
+                    Total provisjon:
+                  </Typography>
+                </Grid>
+                <Grid item xs={6}>
+                  <Typography variant="subtitle1" fontWeight="bold" align="right" color={theme.palette.success.main}>
+                    {total.toLocaleString('nb-NO')} kr
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Box>
           </Grid>
-          
+
           <Grid item xs={12}>
             <TextField
               label="Beløp å godkjenne"
@@ -138,7 +287,7 @@ const ApprovalDialog = ({
               )}
             </FormHelperText>
           </Grid>
-          
+
           <Grid item xs={12}>
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, flexWrap: 'wrap' }}>
               <Button
@@ -157,11 +306,7 @@ const ApprovalDialog = ({
               >
                 -100 kr
               </Button>
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => handleCommissionAdjustment('reset')}
-              >
+              <Button size="small" variant="outlined" onClick={() => handleCommissionAdjustment('reset')}>
                 Reset
               </Button>
               <Button
@@ -202,16 +347,12 @@ const ApprovalDialog = ({
             />
           </Grid>
 
-          {parseFloat(batchAmount).toFixed(2) !== selectedAgent.commission.toFixed(2) && (
+          {parseFloat(batchAmount).toFixed(2) !== total.toFixed(2) && (
             <Grid item xs={12}>
-              <Alert
-                severity={
-                  parseFloat(batchAmount) > selectedAgent.commission ? 'info' : 'warning'
-                }
-              >
-                {parseFloat(batchAmount) > selectedAgent.commission
-                  ? `Du har økt provisjonsbeløpet med ${(parseFloat(batchAmount) - selectedAgent.commission).toFixed(2).toLocaleString('nb-NO')} kr`
-                  : `Du har redusert provisjonsbeløpet med ${(selectedAgent.commission - parseFloat(batchAmount)).toFixed(2).toLocaleString('nb-NO')} kr`}
+              <Alert severity={parseFloat(batchAmount) > total ? 'info' : 'warning'}>
+                {parseFloat(batchAmount) > total
+                  ? `Du har økt provisjonsbeløpet med ${(parseFloat(batchAmount) - total).toFixed(2).toLocaleString('nb-NO')} kr`
+                  : `Du har redusert provisjonsbeløpet med ${(total - parseFloat(batchAmount)).toFixed(2).toLocaleString('nb-NO')} kr`}
                 . {!batchComment && ' Det anbefales å legge til en kommentar for å forklare endringen.'}
               </Alert>
             </Grid>

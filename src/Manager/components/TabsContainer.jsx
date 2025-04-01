@@ -1,87 +1,97 @@
-import React from 'react';
-import {
-  Paper,
-  Tabs,
-  Tab,
-  Box
-} from '@mui/material';
-import { PeopleAlt, CheckCircle } from '@mui/icons-material';
+import React, { memo, useState } from 'react';
+import { Paper, Tabs, Tab } from '@mui/material';
+import { PeopleAlt } from '@mui/icons-material';
 import AgentTab from './tabs/AgentTab';
-import MonthlyApprovalsTab from './tabs/MonthlyApprovalsTab';
+import RevocationDialog from './RevocationDialog';
+import { useManagerData } from '../hooks/useManagerData';
 
-// Chart colors for consistent appearance
-const CHART_COLORS = [
-  '#0088FE', '#00C49F', '#FFBB28', '#FF8042', 
-  '#8884d8', '#82ca9d', '#ffc658', '#ff8042'
-];
+const CHART_COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
 
-const TabsContainer = ({ 
+const TabsContainer = memo(({ 
   tabValue, 
   setTabValue,
   agentPerformance,
-  updateAgentPerformance, // Add this prop
+  updateAgentPerformance,
   salaryModels,
-  showApproved,
-  setShowApproved,
+  openBatchApproval,
+  fetchApprovals,
+  openRevocationDialog,
   selectedMonth,
   monthlyApprovals,
   refreshingApprovals,
-  fetchMonthlyApprovals,
-  openBatchApproval,
-  openRevocationDialog,
+  showApproved,
+  setShowApproved,
   debugApprovalStatus,
   approvalSuccess,
-  setApprovalSuccess
+  setApprovalSuccess,
 }) => {
+  const [revokeDialogOpen, setRevokeDialogOpen] = useState(false);
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [selectedRevokeMonth, setSelectedRevokeMonth] = useState(null);
+
+  const { managerData, loading, error } = useManagerData();
+
+  const handleOpenRevokeDialog = (agent, month) => {
+    setSelectedAgent(agent);
+    setSelectedRevokeMonth(month);
+    setRevokeDialogOpen(true);
+  };
+
+  const closeRevokeDialog = () => {
+    setRevokeDialogOpen(false);
+    setSelectedAgent(null);
+    setSelectedRevokeMonth(null);
+  };
+
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
   };
 
-  return (
-    <Paper sx={{ mb: 3, borderRadius: 2 }}>
-      <Tabs
-        value={tabValue < 2 ? tabValue : tabValue - 2} // Adjust value to handle removed tabs
-        onChange={handleTabChange}
-        indicatorColor="primary"
-        textColor="primary"
-        sx={{ borderBottom: 1, borderColor: 'divider' }}
-      >
-        <Tab icon={<PeopleAlt />} iconPosition="start" label="Rådgivere" />
-        <Tab 
-          icon={<CheckCircle />} 
-          iconPosition="start" 
-          label="Godkjenn lønn" 
-        />
-      </Tabs>
+  if (loading) return <p>Laster inn...</p>;
+  if (error) return <p>Feil: {error}</p>;
 
-      {tabValue === 0 && (
+  return (
+    <>
+      <Paper sx={{ mb: 3, borderRadius: 2 }}>
+        <Tabs
+          value={tabValue}
+          onChange={handleTabChange}
+          indicatorColor="primary"
+          textColor="primary"
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab icon={<PeopleAlt />} iconPosition="start" label="Rådgivere" />
+        </Tabs>
+
         <AgentTab 
           agentPerformance={agentPerformance}
-          updateAgentPerformance={updateAgentPerformance} // Pass the update function
+          updateAgentPerformance={updateAgentPerformance}
           salaryModels={salaryModels}
           CHART_COLORS={CHART_COLORS}
-        />
-      )}
-
-      {(tabValue === 1 || tabValue === 3) && ( // Support both original tab value 3 and new value 1
-        <MonthlyApprovalsTab 
-          agentPerformance={agentPerformance}
-          showApproved={showApproved}
-          setShowApproved={setShowApproved}
+          openBatchApproval={openBatchApproval}
+          openRevokeDialog={openRevocationDialog ? openRevocationDialog : handleOpenRevokeDialog}
           selectedMonth={selectedMonth}
           monthlyApprovals={monthlyApprovals}
           refreshingApprovals={refreshingApprovals}
-          fetchMonthlyApprovals={fetchMonthlyApprovals}
-          openBatchApproval={openBatchApproval}
-          openRevocationDialog={openRevocationDialog}
+          showApproved={showApproved}
+          setShowApproved={setShowApproved}
           debugApprovalStatus={debugApprovalStatus}
           approvalSuccess={approvalSuccess}
           setApprovalSuccess={setApprovalSuccess}
-          CHART_COLORS={CHART_COLORS}
+        />
+      </Paper>
+
+      {!openRevocationDialog && (
+        <RevocationDialog
+          open={revokeDialogOpen}
+          onClose={closeRevokeDialog}
+          selectedAgent={selectedAgent}
+          selectedMonth={selectedRevokeMonth}
+          fetchApprovals={fetchApprovals}
         />
       )}
-    </Paper>
+    </>
   );
-};
+});
 
 export default TabsContainer;

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -10,44 +10,67 @@ import {
   TextField,
   InputAdornment,
   Alert,
-  AlertTitle,
   CircularProgress,
 } from '@mui/material';
 import { Comment, Cancel } from '@mui/icons-material';
+import { supabase } from '../../services/supabase/supabaseClient';
 
 const RevocationDialog = ({
   open,
   onClose,
   selectedAgent,
   selectedMonth,
-  revocationReason,
-  setRevocationReason,
-  handleRevokeApproval,
-  approvalError,
-  revocationLoading
+  fetchApprovals,
 }) => {
+  const [revocationReason, setRevocationReason] = useState('');
+  const [revocationLoading, setRevocationLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleRevokeApproval = async () => {
+    setRevocationLoading(true);
+    setError(null);
+
+    try {
+      const { error } = await supabase
+        .from('monthly_commission_approvals')
+        .update({
+          revoked: true,
+          approved: false, // Ensure the approved field is explicitly set to false
+          revoked_at: new Date().toISOString(),
+          revocation_reason: revocationReason || 'Ingen årsak oppgitt',
+        })
+        .eq('agent_name', selectedAgent.name)
+        .eq('month_year', selectedMonth)
+        .eq('approved', true); // Only revoke if it was approved
+
+      if (error) {
+        throw error;
+      }
+
+      await fetchApprovals(); // Refresh UI after revocation
+      onClose();
+    } catch (err) {
+      setError('Kunne ikke trekke tilbake godkjenning. Prøv igjen senere.');
+      console.error('Error revoking approval:', err.message);
+    } finally {
+      setRevocationLoading(false);
+    }
+  };
+
   if (!selectedAgent) {
     return null;
   }
 
   return (
-    <Dialog 
-      open={open} 
-      onClose={onClose}
-      maxWidth="sm"
-      fullWidth
-    >
-      <DialogTitle>
-        Trekk tilbake godkjenning
-      </DialogTitle>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Trekk tilbake godkjenning</DialogTitle>
       <DialogContent>
-        {approvalError && (
+        {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
-            {approvalError}
+            {error}
           </Alert>
         )}
-        
-        <Grid container spacing={2} sx={{ mt: 1 }}>
+        <Grid container spacing={2}>
           <Grid item xs={12}>
             <Typography variant="subtitle1" fontWeight="bold">
               Trekk tilbake godkjenning for {selectedAgent.name}
@@ -56,16 +79,14 @@ const RevocationDialog = ({
               Måned: {selectedMonth?.replace('-', '/')}
             </Typography>
           </Grid>
-          
           <Grid item xs={12}>
-            <Alert severity="warning" sx={{ mb: 2 }}>
-              <AlertTitle>Advarsel</AlertTitle>
-              Å trekke tilbake godkjenning vil fjerne denne agentens provisjon fra månedlig utbetaling. 
-              Dette bør kun gjøres hvis godkjenningen var feilaktig eller hvis det har oppstått andre 
-              grunner til at provisjonen ikke skal utbetales.
+            <Alert severity="warning">
+              Å trekke tilbake godkjenning vil fjerne denne agentens provisjon
+              fra månedlig utbetaling. Dette bør kun gjøres hvis godkjenningen
+              var feilaktig eller det er andre grunner til at provisjonen ikke
+              skal utbetales.
             </Alert>
           </Grid>
-          
           <Grid item xs={12}>
             <TextField
               label="Årsak for tilbaketrekking"
@@ -85,15 +106,9 @@ const RevocationDialog = ({
               }}
             />
           </Grid>
-          
-          <Grid item xs={12}>
-            <Typography variant="body2" color="error">
-              Merk: Denne handlingen loggføres og kan ikke angres.
-            </Typography>
-          </Grid>
         </Grid>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
+      <DialogActions>
         <Button onClick={onClose} color="inherit" disabled={revocationLoading}>
           Avbryt
         </Button>
@@ -104,7 +119,7 @@ const RevocationDialog = ({
           startIcon={<Cancel />}
           disabled={revocationLoading || !revocationReason}
         >
-          {revocationLoading ? <CircularProgress size={24} /> : 'Trekk tilbake godkjenning'}
+          {revocationLoading ? <CircularProgress size={24} /> : 'Trekk tilbake'}
         </Button>
       </DialogActions>
     </Dialog>

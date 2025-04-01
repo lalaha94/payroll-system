@@ -109,6 +109,35 @@ USING (
   (public.is_office_manager_for_company(agent_company) OR public.is_admin_user())
 );
 
+-- Ensure managers can update approvals for their agents
+CREATE POLICY "Managers can approve commissions" 
+ON public.monthly_commission_approvals
+FOR UPDATE
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 
+        FROM public.employees e
+        WHERE e.email = auth.email()
+        AND e.role = 'manager'
+        AND e.agent_company = monthly_commission_approvals.agent_company
+    )
+);
+
+-- Ensure admins have full access
+CREATE POLICY "Admins can manage all approvals" 
+ON public.monthly_commission_approvals
+FOR ALL
+TO authenticated
+USING (
+    EXISTS (
+        SELECT 1 
+        FROM public.employees e
+        WHERE e.email = auth.email()
+        AND e.role = 'admin'
+    )
+);
+
 -- Grant permissions
 GRANT SELECT, INSERT, UPDATE, DELETE ON monthly_commission_approvals TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_authenticated() TO authenticated;

@@ -75,3 +75,14 @@ WITH CHECK (
         AND e2.name = sales_data.agent_name
     )
 );
+
+-- Add unique constraint to prevent duplicate approvals for the same agent and month
+ALTER TABLE public.monthly_commission_approvals 
+ADD CONSTRAINT unique_agent_month_approval UNIQUE (agent_name, month_year);
+
+-- Ensure indexes exist for faster queries
+CREATE INDEX IF NOT EXISTS idx_monthly_commission_approvals_agent_month 
+ON public.monthly_commission_approvals (agent_name, month_year);
+
+CREATE INDEX IF NOT EXISTS idx_monthly_commission_approvals_approved 
+ON public.monthly_commission_approvals (approved, revoked);

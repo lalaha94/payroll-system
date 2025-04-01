@@ -1,12 +1,18 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
+import path from 'path';
 
 export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
+      // Legg til alias for enklere import
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  server: {
+    hmr: {
+      overlay: false, // Deaktiver feilmeldingsoverlay hvis ønskelig
     },
   },
 });

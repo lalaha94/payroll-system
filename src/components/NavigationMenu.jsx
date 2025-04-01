@@ -139,7 +139,13 @@ function NavigationMenu() {
     try {
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
-      navigate('/login');
+      
+      // Rydd opp i eventuelle lokale tilstander
+      localStorage.clear();
+      sessionStorage.clear();
+      
+      // Tving en full sideoppdatering for å sikre at all tilstand blir nullstilt
+      window.location.href = '/login';
     } catch (error) {
       console.error('Utlogging feilet:', error);
     }

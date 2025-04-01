@@ -260,6 +260,9 @@ function AccountingExport() {
         }
         return sum;
       }, 0);
+
+      const fivePercentDeduction = totalDeductions * 0.05; // Example calculation for 5% deduction
+      const otherDeductions = totalDeductions - fivePercentDeduction; // Example calculation for other deductions
       
       // Create payroll record
       const baseSalary = parseFloat(salaryModel.base_salary) || 0;
@@ -280,6 +283,8 @@ function AccountingExport() {
         skadeCommission: commission.skadeCommission,
         totalCommission: commission.totalCommission,
         deductions: totalDeductions,
+        fivePercentDeduction,
+        otherDeductions,
         totalSalary,
         deductionDetails: employeeDeductions.map(d => ({
           name: d.name,
@@ -299,35 +304,60 @@ function AccountingExport() {
   const calculateCommission = (data, salaryModels) => {
     const model = salaryModels.find(m => parseInt(m.id) === parseInt(data.salary_level));
     
-    const activeModel = model || salaryModels[0] || {
-      commission_liv: 0,
-      commission_skade: 0,
-      bonus_enabled: false
-    };
-    
-    let livRate = parseFloat(activeModel.commission_liv) || 0;
-    let skadeRate = parseFloat(activeModel.commission_skade) || 0;
-    
-    let livCommission = data.livPremium * livRate / 100;
-    let skadeCommission = data.skadePremium * skadeRate / 100;
-    
-    const totalPremium = data.livPremium + data.skadePremium;
-    
-    if (activeModel.bonus_enabled && 
-        activeModel.bonus_threshold && 
-        totalPremium >= parseFloat(activeModel.bonus_threshold)) {
-      
-      const bonusLivRate = parseFloat(activeModel.bonus_percentage_liv) || 0;
-      const bonusSkadeRate = parseFloat(activeModel.bonus_percentage_skade) || 0;
-      
-      livCommission += data.livPremium * bonusLivRate / 100;
-      skadeCommission += data.skadePremium * bonusSkadeRate / 100;
+    // 1. Handle case where salary model is missing
+    if (!model) {
+      console.warn(`calculateCommission: No salary model found for agent in AccountingExport. Returning zero commission.`);
+      return { 
+        livCommission: 0, 
+        skadeCommission: 0, 
+        bonusAmount: 0,
+        totalCommission: 0
+      };
     }
     
+    // 2. Get rates from the model (use parseFloat and default to 0)
+    const livRate = parseFloat(model.commission_liv) || 0;
+    const skadeRate = parseFloat(model.commission_skade) || 0;
+    
+    // 3. Calculate base commission (use parseFloat for agent's premium)
+    const agentLivPremium = parseFloat(data.livPremium) || 0;
+    const agentSkadePremium = parseFloat(data.skadePremium) || 0;
+    
+    let livCommission = agentLivPremium * (livRate / 100);
+    let skadeCommission = agentSkadePremium * (skadeRate / 100);
+    
+    // 4. Handle bonus calculation
+    let bonusAmount = 0;
+    const bonusThreshold = parseFloat(model.bonus_threshold);
+    const totalPremium = agentLivPremium + agentSkadePremium;
+    
+    // Check if there's a valid bonus threshold and if it's reached
+    if (!isNaN(bonusThreshold) && bonusThreshold > 0 && 
+        totalPremium >= bonusThreshold && model.bonus_enabled) {
+      
+      // Get bonus percentages
+      const bonusPercentageLiv = parseFloat(model.bonus_percentage_liv) || 0;
+      const bonusPercentageSkade = parseFloat(model.bonus_percentage_skade) || 0;
+      
+      // Calculate bonus amount
+      let livBonus = agentLivPremium * (bonusPercentageLiv / 100);
+      let skadeBonus = agentSkadePremium * (bonusPercentageSkade / 100);
+      bonusAmount = livBonus + skadeBonus;
+      
+      // Adjust existing commission values to include bonus
+      livCommission += livBonus;
+      skadeCommission += skadeBonus;
+    }
+    
+    // 5. Calculate total commission
+    let totalCommission = livCommission + skadeCommission;
+    
+    // 6. Return a simplified object for AccountingExport
     return {
       livCommission,
       skadeCommission,
-      totalCommission: livCommission + skadeCommission
+      bonusAmount,
+      totalCommission
     };
   };
   
@@ -379,6 +409,8 @@ function AccountingExport() {
         
         if (includeDeductions) {
           data["Sum Trekk"] = record.deductions;
+          data["5% Trekk"] = record.fivePercentDeduction;
+          data["Anbudstrekk"] = record.otherDeductions;
           
           // Add individual deductions
           record.deductionDetails.forEach((deduction, index) => {
@@ -413,6 +445,8 @@ function AccountingExport() {
         { wch: 12 }, // Skade Provisjon
         { wch: 12 }, // Total Provisjon
         { wch: 12 }, // Sum Trekk
+        { wch: 12 }, // 5% Trekk
+        { wch: 12 }, // Anbudstrekk
         { wch: 15 }  // Utbetalt Lønn
       ];
       ws['!cols'] = wscols;
@@ -450,6 +484,8 @@ function AccountingExport() {
         totalLivCommission: 0,
         totalSkadeCommission: 0,
         totalDeductions: 0,
+        totalFivePercentDeduction: 0,
+        totalOtherDeductions: 0,
         totalNetSalary: 0,
         employeeCount: filteredPayrollData.length,
         departmentSummary: {}
@@ -463,6 +499,8 @@ function AccountingExport() {
         summary.totalLivCommission += record.livCommission;
         summary.totalSkadeCommission += record.skadeCommission;
         summary.totalDeductions += record.deductions;
+        summary.totalFivePercentDeduction += record.fivePercentDeduction;
+        summary.totalOtherDeductions += record.otherDeductions;
         summary.totalNetSalary += record.totalSalary;
         
         // Group by department
@@ -494,6 +532,8 @@ function AccountingExport() {
         { Category: "Total Skade Provisjon", Value: summary.totalSkadeCommission },
         { Category: "Total Provisjon", Value: summary.totalLivCommission + summary.totalSkadeCommission },
         { Category: "Total Trekk", Value: summary.totalDeductions },
+        { Category: "5% Trekk", Value: summary.totalFivePercentDeduction },
+        { Category: "Anbudstrekk", Value: summary.totalOtherDeductions },
         { Category: "Total Netto Utbetalt", Value: summary.totalNetSalary }
       ];
       
@@ -841,6 +881,8 @@ function AccountingExport() {
                   <TableCell align="right">Premium (Liv)</TableCell>
                   <TableCell align="right">Premium (Skade)</TableCell>
                   <TableCell align="right">Provisjon</TableCell>
+                  <TableCell align="right">5% Trekk</TableCell>
+                  <TableCell align="right">Anbudstrekk</TableCell>
                   {showApprovalDetails && <TableCell>Godkjent av</TableCell>}
                   <TableCell align="right">Trekk</TableCell>
                   <TableCell align="right">Netto Lønn</TableCell>
@@ -898,6 +940,12 @@ function AccountingExport() {
                           </Box>
                         </Tooltip>
                       )}
+                    </TableCell>
+                    <TableCell align="right">
+                      -{record.fivePercentDeduction.toLocaleString('nb-NO')} kr
+                    </TableCell>
+                    <TableCell align="right">
+                      -{record.otherDeductions.toLocaleString('nb-NO')} kr
                     </TableCell>
                     {showApprovalDetails && (
                       <TableCell>
@@ -998,6 +1046,24 @@ function AccountingExport() {
                   <Grid item xs={6}>
                     <Typography align="right" fontWeight="bold" color={theme.palette.error.main}>
                       -{filteredPayrollData.reduce((sum, record) => sum + record.deductions, 0).toLocaleString('nb-NO')} kr
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={6}>
+                    <Typography color="text.secondary">5% Trekk:</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography align="right" fontWeight="bold" color={theme.palette.warning.main}>
+                      -{filteredPayrollData.reduce((sum, record) => sum + record.fivePercentDeduction, 0).toLocaleString('nb-NO')} kr
+                    </Typography>
+                  </Grid>
+
+                  <Grid item xs={6}>
+                    <Typography color="text.secondary">Anbudstrekk:</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography align="right" fontWeight="bold" color={theme.palette.info.main}>
+                      -{filteredPayrollData.reduce((sum, record) => sum + record.otherDeductions, 0).toLocaleString('nb-NO')} kr
                     </Typography>
                   </Grid>
                   
