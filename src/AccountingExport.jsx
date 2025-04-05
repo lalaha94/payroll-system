@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "./supabaseClient";
-import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import {
   Box,
   Typography,
@@ -373,69 +373,98 @@ function AccountingExport() {
   });
   
   // Export to Excel
-  const exportToExcel = async () => {
+  const exportToExcel = () => {
+    if (filteredPayrollData.length === 0) {
+      setError("Ingen data å eksportere");
+      return;
+    }
+    
     try {
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet('Lønnsdata');
-
-      // Add headers
-      worksheet.columns = [
-        { header: 'Måned', key: 'month', width: 15 },
-        { header: 'Ansatt', key: 'employee', width: 30 },
-        { header: 'Fastlønn', key: 'baseSalary', width: 15 },
-        { header: 'Skadeprovisjon', key: 'skadeCommission', width: 15 },
-        { header: 'Livprovisjon', key: 'livCommission', width: 15 },
-        { header: 'Sum før trekk', key: 'totalBeforeDeductions', width: 15 },
-        { header: '5% trekk', key: 'fivePercentDeduction', width: 15 },
-        { header: 'Tjenestetorget trekk', key: 'tjenestetorgetDeduction', width: 20 },
-        { header: 'Bytt trekk', key: 'exchangeDeduction', width: 15 },
-        { header: 'Andre trekk', key: 'otherDeductions', width: 15 },
-        { header: 'Total provisjon', key: 'totalCommission', width: 15 }
-      ];
-
-      // Add data
-      payrollData.forEach(record => {
-        worksheet.addRow({
-          month: record.month,
-          employee: record.employee,
-          baseSalary: record.baseSalary,
-          skadeCommission: record.skadeCommission,
-          livCommission: record.livCommission,
-          totalBeforeDeductions: record.totalBeforeDeductions,
-          fivePercentDeduction: record.fivePercentDeduction,
-          tjenestetorgetDeduction: record.tjenestetorgetDeduction,
-          exchangeDeduction: record.exchangeDeduction,
-          otherDeductions: record.otherDeductions,
-          totalCommission: record.totalCommission
-        });
+      // Create workbook and worksheet
+      const wb = XLSX.utils.book_new();
+      
+      // Prepare data for export
+      const exportData = filteredPayrollData.map(record => {
+        const data = {
+          "Måned": record.month,
+          "ID": record.employeeId,
+          "Navn": record.employeeName,
+          "Avdeling": record.department,
+          "Stilling": record.position,
+          "Lønnstrinn": record.salaryModelName
+        };
+        
+        if (includeBaseSalary) {
+          data["Grunnlønn"] = record.baseSalary;
+        }
+        
+        if (includeCommissions) {
+          data["Liv Premium"] = record.livPremium;
+          data["Skade Premium"] = record.skadePremium;
+          data["Total Premium"] = record.totalPremium;
+          data["Liv Provisjon"] = record.livCommission;
+          data["Skade Provisjon"] = record.skadeCommission;
+          data["Total Provisjon"] = record.totalCommission;
+        }
+        
+        if (includeDeductions) {
+          data["Sum Trekk"] = record.deductions;
+          data["5% Trekk"] = record.fivePercentDeduction;
+          data["Anbudstrekk"] = record.otherDeductions;
+          
+          // Add individual deductions
+          record.deductionDetails.forEach((deduction, index) => {
+            data[`Trekk ${index+1}: ${deduction.name}`] = deduction.amount;
+          });
+        }
+        
+        data["Utbetalt Lønn"] = record.totalSalary;
+        
+        return data;
       });
-
-      // Style the header row
-      worksheet.getRow(1).font = { bold: true };
-      worksheet.getRow(1).fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE0E0E0' }
-      };
-
-      // Generate buffer
-      const buffer = await workbook.xlsx.writeBuffer();
-
-      // Create blob and download
-      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `lonnsdata_${selectedMonth}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-
-      setSuccess('Eksport fullført');
+      
+      // Create worksheet
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      
+      // Add worksheet to workbook
+      XLSX.utils.book_append_sheet(wb, ws, "Lønnsdata");
+      
+      // Format column widths
+      const wscols = [
+        { wch: 10 }, // Måned
+        { wch: 10 }, // ID
+        { wch: 25 }, // Navn
+        { wch: 20 }, // Avdeling
+        { wch: 15 }, // Stilling
+        { wch: 15 }, // Lønnstrinn
+        { wch: 12 }, // Grunnlønn
+        { wch: 12 }, // Liv Premium
+        { wch: 12 }, // Skade Premium
+        { wch: 12 }, // Total Premium
+        { wch: 12 }, // Liv Provisjon
+        { wch: 12 }, // Skade Provisjon
+        { wch: 12 }, // Total Provisjon
+        { wch: 12 }, // Sum Trekk
+        { wch: 12 }, // 5% Trekk
+        { wch: 12 }, // Anbudstrekk
+        { wch: 15 }  // Utbetalt Lønn
+      ];
+      ws['!cols'] = wscols;
+      
+      // Export
+      const fileName = `Lønnsdata_${selectedMonth}${selectedEmployee ? `_${selectedEmployee}` : ''}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      
+      setSuccess(`Data eksportert til ${fileName}`);
+      
+      // Clear success message after 3 seconds
+      setTimeout(() => {
+        setSuccess(null);
+      }, 3000);
+      
     } catch (error) {
-      console.error('Error exporting to Excel:', error);
-      setError('Feil ved eksport til Excel');
+      console.error("Error exporting to Excel:", error);
+      setError(`Eksport feilet: ${error.message}`);
     }
   };
   

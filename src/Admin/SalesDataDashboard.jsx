@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useTheme } from '@mui/material/styles';
 import {
   Box, Typography, Grid, Card, CardContent, Divider, TextField,
@@ -18,6 +18,7 @@ import {
   PieChart as PieChartIcon, BarChart as BarChartIcon,
   CheckCircle, Cancel, Info
 } from '@mui/icons-material';
+import { differenceInMonths } from 'date-fns';
 
 function SalesDataDashboard() {
   const theme = useTheme();
@@ -90,6 +91,18 @@ function SalesDataDashboard() {
     theme.palette.info.main,
   ];
   
+  // Legg til formatCurrency funksjon
+  const formatCurrency = (value) => {
+    // Håndter null eller undefined verdier
+    if (value === undefined || value === null) {
+      return '0,00 kr';
+    }
+    return value.toLocaleString('no-NO', { 
+      minimumFractionDigits: 2, 
+      maximumFractionDigits: 2 
+    }) + ' kr';
+  };
+  
   // Fetch data on component mount
   useEffect(() => {
     const fetchData = async () => {
@@ -97,40 +110,93 @@ function SalesDataDashboard() {
       setError(null);
       
       try {
+        // Sjekk autentisering først
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error('Ingen aktiv sesjon funnet');
+        }
+
         // Fetch data in parallel for better performance
         const [salesResponse, modelsResponse, monthlyApprovals, employeesResponse, tenderResponse] = await Promise.all([
-          supabase.from('sales_data').select('*'),
-          supabase.from('salary_models').select('*'),
-          supabase.from('monthly_commission_approvals').select('*'),
-          supabase.from('employees').select('name, agent_id, agent_company, salary_model_id'),
-          supabase.from('tender_data').select('*')
+          supabase
+            .from('sales_data')
+            .select('*')
+            .order('policy_sale_date', { ascending: false }),
+          supabase
+            .from('salary_models')
+            .select('*'),
+          supabase
+            .from('monthly_commission_approvals')
+            .select('*'),
+          supabase
+            .from('employees')
+            .select('name, agent_id, agent_company, salary_model_id, hire_date, apply_five_percent_deduction'),
+          supabase
+            .from('tender_data')
+            .select('*')
         ]);
         
-        if (salesResponse.error) throw new Error(salesResponse.error.message);
-        if (modelsResponse.error) throw new Error(modelsResponse.error.message);
-        if (monthlyApprovals.error) throw new Error(monthlyApprovals.error.message);
-        if (employeesResponse.error) throw new Error(employeesResponse.error.message);
-        if (tenderResponse.error) throw new Error(tenderResponse.error.message);
+        // Logg responser for debugging
+        console.log('Data responses:', {
+          sales: salesResponse,
+          models: modelsResponse,
+          approvals: monthlyApprovals,
+          employees: employeesResponse,
+          tenders: tenderResponse
+        });
         
-        // Create a map of agent names to their salary model IDs from employees table
+        if (salesResponse.error) throw new Error(`Sales data error: ${salesResponse.error.message}`);
+        if (modelsResponse.error) throw new Error(`Salary models error: ${modelsResponse.error.message}`);
+        if (monthlyApprovals.error) throw new Error(`Approvals error: ${monthlyApprovals.error.message}`);
+        if (employeesResponse.error) throw new Error(`Employees error: ${employeesResponse.error.message}`);
+        if (tenderResponse.error) throw new Error(`Tender data error: ${tenderResponse.error.message}`);
+
+        // Organiser anbudsdata etter agent
+        const tenderMap = {};
+        if (tenderResponse.data) {
+          console.log('Processing tender data:', tenderResponse.data);
+          tenderResponse.data.forEach(tender => {
+            if (!tender.agent_name || !tender.month_year) {
+              console.warn('Invalid tender data:', tender);
+              return;
+            }
+            const key = `${tender.agent_name}-${tender.month_year}`;
+            console.log('Processing tender for key:', key);
+            tenderMap[key] = {
+              tjenestetorget: parseFloat(tender.tjenestetorget) || 0,
+              bytt: parseFloat(tender.bytt) || 0,
+              other: parseFloat(tender.other) || 0
+            };
+          });
+        }
+        console.log('Final tender map:', tenderMap);
+        setTenderData(tenderMap);
+        
+        // Create a map of agent names to their employee data from employees table
         const employeeSalaryModels = {};
         employeesResponse.data.forEach(employee => {
-          if (employee.name && employee.salary_model_id) {
-            employeeSalaryModels[employee.name] = employee.salary_model_id;
+          if (employee.name) {
+            employeeSalaryModels[employee.name] = {
+              salary_model_id: employee.salary_model_id,
+              agent_company: employee.agent_company,
+              agent_id: employee.agent_id,
+              hire_date: employee.hire_date,
+              apply_five_percent_deduction: employee.apply_five_percent_deduction
+            };
           }
         });
         
         // Process sales data to get agent performance by month
-        const { agents, uniqueMonths } = aggregateSalesByAgent(salesResponse.data || [], employeeSalaryModels);
+        const { agentData: processedAgents, months: processedMonths } = aggregateSalesByAgent(salesResponse.data || [], employeeSalaryModels, modelsResponse.data || []);
         
         // Sort months in descending order (most recent first)
-        const sortedMonths = [...uniqueMonths].sort((a, b) => b.localeCompare(a));
+        const sortedMonths = [...processedMonths].sort((a, b) => b.localeCompare(a));
         
         // Set default selected month to most recent
         const latestMonth = sortedMonths.length > 0 ? sortedMonths[0] : '';
         
         // Calculate commissions for each agent using the salary models
-        const agentsWithCommission = agents.map(agent => {
+        const agentsWithCommission = processedAgents.map(agent => {
           const commission = calculateCommission(agent, modelsResponse.data || []);
           
           // Check if there's an approved commission for this agent/month
@@ -145,22 +211,10 @@ function SalesDataDashboard() {
             ...agent, 
             ...commission,
             isApproved: !!approvalRecord,
-            approvedCommission: approvalRecord?.approved_commission || null,
+            approvedCommission: approvalRecord?.commission || null,
             approvalInfo: approvalRecord || null
           };
         });
-        
-        // Organiser anbudsdata etter agent og måned
-        const tenderMap = {};
-        tenderResponse.data?.forEach(tender => {
-          const key = `${tender.agent_name}-${tender.month_year}`;
-          tenderMap[key] = {
-            tjenestetorget: tender.tjenestetorget || 0,
-            bytt: tender.bytt || 0,
-            other: tender.other || 0
-          };
-        });
-        setTenderData(tenderMap);
         
         setSalesData(salesResponse.data || []);
         setAgentData(agentsWithCommission);
@@ -177,12 +231,18 @@ function SalesDataDashboard() {
     };
     
     fetchData();
-  }, []);
+  }, [selectedMonth]);
   
   // Aggregate sales data by agent and month
-  const aggregateSalesByAgent = (salesData, employeeSalaryModels) => {
+  const aggregateSalesByAgent = (salesData, employeeSalaryModels, salaryModels) => {
     const agentMonthMap = {};
     const uniqueMonths = new Set();
+    
+    // Finn lønnstrinn 1
+    const defaultSalaryModel = salaryModels.find(model => String(model.id) === '1');
+    if (!defaultSalaryModel) {
+      console.warn('Kunne ikke finne lønnstrinn 1 som standard lønnstrinn');
+    }
     
     salesData.forEach(sale => {
       if (!sale.policy_sale_date || !sale.agent_name) return;
@@ -191,29 +251,71 @@ function SalesDataDashboard() {
       if (sale.cancel_code) return;
       
       const date = new Date(sale.policy_sale_date);
-      if (isNaN(date.getTime())) return;
-      
       const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       uniqueMonths.add(monthKey);
       
-      const agentMonthKey = `${sale.agent_name}:${monthKey}`;
+      const agentKey = `${sale.agent_name}_${monthKey}`;
       
-      if (!agentMonthMap[agentMonthKey]) {
-        // Get salary level from either sale data or employees table
-        const salary_level = sale.agent_salary_level || employeeSalaryModels[sale.agent_name] || null;
+      if (!agentMonthMap[agentKey]) {
+        // Hent ansattdata fra employeeSalaryModels objektet
+        const employeeData = employeeSalaryModels[sale.agent_name] || {};
         
-        agentMonthMap[agentMonthKey] = {
+        // Beregn ansettelsestid hvis vi har hire_date
+        let shouldApplyFivePercent = false;
+        const hireDate = employeeData.hire_date ? new Date(employeeData.hire_date) : null;
+        let monthsEmployed = null;
+        
+        if (hireDate) {
+          // Sjekk om ansatt har jobbet mindre enn 9 måneder
+          monthsEmployed = differenceInMonths(new Date(), hireDate);
+          shouldApplyFivePercent = monthsEmployed < 9;
+          
+          console.log(`Agent ${sale.agent_name} ansettelsestid:`, {
+            hireDate: hireDate.toISOString().split('T')[0],
+            monthsEmployed,
+            shouldApplyFivePercent
+          });
+        }
+        
+        // Sjekk om apply_five_percent_deduction er satt manuelt
+        const manualFivePercentSetting = employeeData.apply_five_percent_deduction;
+        
+        // Bestem endelig 5% trekk-status: Enten på grunn av <9 måneder eller manuelt satt til true
+        const applyFivePercent = manualFivePercentSetting === true || shouldApplyFivePercent;
+        
+        console.log(`Agent ${sale.agent_name} 5% trekk status:`, {
+          shouldApplyFivePercent,
+          manualSetting: manualFivePercentSetting,
+          finalDecision: applyFivePercent
+        });
+        
+        // Bruk lønnstrinn 1 som standard hvis ingen lønnstrinn er satt
+        const actualSalaryModelId = employeeData.salary_model_id || '1';
+        
+        // Finn lønnstrinnmodellen
+        const salaryModel = salaryModels.find(model => 
+          String(model.id) === String(actualSalaryModelId)
+        ) || defaultSalaryModel;
+        
+        agentMonthMap[agentKey] = {
           agent_name: sale.agent_name,
-          agent_id: sale.agent_id,
-          monthKey: monthKey,
-          agent_company: sale.agent_company,
-          salary_level: salary_level,
+          monthKey,
           livPremium: 0,
           skadePremium: 0,
           totalPremium: 0,
-          livCount: 0,
-          skadeCount: 0,
-          totalCount: 0
+          saleCount: 0,
+          salary_model_id: actualSalaryModelId,
+          salary_model_name: salaryModel?.name || 'Lønnstrinn 1',
+          agent_company: employeeData.agent_company || 'Ukjent',
+          agent_id: employeeData.agent_id,
+          applyFivePercent: applyFivePercent,
+          hire_date: hireDate ? hireDate.toISOString().split('T')[0] : null,
+          monthsEmployed: monthsEmployed,
+          tjenestetorgetDeduction: employeeData.tjenestetorget_deduction || 0,
+          byttDeduction: employeeData.bytt_deduction || 0,
+          otherDeductions: employeeData.other_deductions || 0,
+          baseSalary: employeeData.base_salary || 0,
+          bonus: employeeData.bonus || 0
         };
       }
       
@@ -221,89 +323,203 @@ function SalesDataDashboard() {
       const provisjonsgruppe = (sale.provisjonsgruppe || "").toLowerCase();
       
       if (provisjonsgruppe.includes("life")) {
-        agentMonthMap[agentMonthKey].livPremium += netPremium;
-        agentMonthMap[agentMonthKey].livCount++;
+        agentMonthMap[agentKey].livPremium += netPremium;
       } else if (provisjonsgruppe.includes("pc") || provisjonsgruppe.includes("child") || provisjonsgruppe.includes("skad")) {
-        agentMonthMap[agentMonthKey].skadePremium += netPremium;
-        agentMonthMap[agentMonthKey].skadeCount++;
+        agentMonthMap[agentKey].skadePremium += netPremium;
       }
       
-      agentMonthMap[agentMonthKey].totalPremium += netPremium;
-      agentMonthMap[agentMonthKey].totalCount++;
+      agentMonthMap[agentKey].totalPremium += netPremium;
+      agentMonthMap[agentKey].saleCount++;
     });
     
     return {
-      agents: Object.values(agentMonthMap),
-      uniqueMonths
+      agentData: Object.values(agentMonthMap),
+      months: Array.from(uniqueMonths).sort((a, b) => b.localeCompare(a))
     };
   };
-
+  
   // Calculate commission based on salary model
   const calculateCommission = (agent, salaryModels) => {
-    // Find the agent's salary model
-    const salaryModel = salaryModels.find(model => parseInt(model.id) === parseInt(agent.salary_level));
+    if (!agent || !salaryModels) return { commission: 0 };
+
+    // Finn lønnstrinn 1 som standard
+    const defaultSalaryModel = salaryModels.find(model => String(model.id) === '1');
+    
+    // Bruk lønnstrinn 1 som standard hvis ingen lønnstrinn er satt
+    const actualSalaryModelId = agent.salary_model_id || '1';
+
+    // Finn agentens lønnstrinn
+    const salaryModel = salaryModels.find(model => 
+      String(model.id) === String(actualSalaryModelId)
+    ) || defaultSalaryModel;
 
     if (!salaryModel) {
-      return {
-        livCommission: 0,
-        skadeCommission: 0,
-        totalCommission: 0,
-        salaryModelName: 'Unknown',
-        livRate: 0,
-        skadeRate: 0,
-      };
+      console.warn(`Ingen lønnstrinn funnet for agent ${agent.agent_name}, og kunne ikke finne standardlønnstrinn 1`);
+      return { commission: 0 };
     }
 
-    // Base commission rates
+    // Beregn grunnprovisjon
     const livRate = parseFloat(salaryModel.commission_liv) || 0;
     const skadeRate = parseFloat(salaryModel.commission_skade) || 0;
+    
+    const baseLivCommission = (agent.livPremium || 0) * (livRate / 100);
+    const baseSkadeCommission = (agent.skadePremium || 0) * (skadeRate / 100);
+    
+    // Beregn samlet grunnprovisjon
+    const baseCommission = baseLivCommission + baseSkadeCommission;
+    let totalCommission = baseCommission;
 
-    // Calculate base commissions
-    let livCommission = agent.livPremium * (livRate / 100);
-    let skadeCommission = agent.skadePremium * (skadeRate / 100);
-
-    // Apply bonus if applicable
-    if (
-      salaryModel.bonus_enabled &&
-      salaryModel.bonus_threshold &&
-      (agent.livPremium + agent.skadePremium) >= parseFloat(salaryModel.bonus_threshold)
-    ) {
+    // Sjekk om bonus skal legges til
+    let bonusAmount = 0;
+    if (salaryModel.bonus_enabled && 
+        salaryModel.bonus_threshold && 
+        (agent.livPremium + agent.skadePremium) >= parseFloat(salaryModel.bonus_threshold)) {
+      
       const bonusLivRate = parseFloat(salaryModel.bonus_percentage_liv) || 0;
       const bonusSkadeRate = parseFloat(salaryModel.bonus_percentage_skade) || 0;
-
-      livCommission += agent.livPremium * (bonusLivRate / 100);
-      skadeCommission += agent.skadePremium * (bonusSkadeRate / 100);
+      
+      const bonusLivCommission = (agent.livPremium || 0) * (bonusLivRate / 100);
+      const bonusSkadeCommission = (agent.skadePremium || 0) * (bonusSkadeRate / 100);
+      
+      bonusAmount = bonusLivCommission + bonusSkadeCommission;
+      totalCommission += bonusAmount;
     }
 
-    const totalCommission = livCommission + skadeCommission;
+    // Totalbeløp før trekk - dette er beregnet provisjon
+    const totalBeforeTrekk = totalCommission;
+    
+    // Sjekk om agenten skal ha 5% trekk basert på flagget
+    const applyFivePercent = agent.applyFivePercent !== undefined ? agent.applyFivePercent : false;
+    
+    // VIKTIG: 5% trekket skal beregnes basert på totalbeløp før trekk
+    const fivePercentDeduction = applyFivePercent ? totalBeforeTrekk * 0.05 : 0;
+
+    // Andre trekk
+    const tjenestetorgetDeduction = agent.tjenestetorgetDeduction || 0;
+    const byttDeduction = agent.byttDeduction || 0;
+    const otherDeductions = agent.otherDeductions || 0;
+    
+    // Legg til fastlønn og bonus
+    const baseSalary = agent.baseSalary || 0;
+    const bonus = agent.bonus || 0;
+
+    // Beregn endelig provisjon - dette er provisjon etter alle trekk
+    const finalCommission = totalBeforeTrekk - fivePercentDeduction - 
+      tjenestetorgetDeduction - byttDeduction - otherDeductions + 
+      baseSalary + bonus;
+
+    console.log(`Provisjonsberegning for ${agent.agent_name}:`, {
+      livPremium: agent.livPremium,
+      skadePremium: agent.skadePremium,
+      baseLivCommission,
+      baseSkadeCommission,
+      bonusAmount,
+      baseCommission,
+      totalBeforeTrekk,
+      applyFivePercent,
+      fivePercentDeduction,
+      tjenestetorgetDeduction,
+      byttDeduction,
+      otherDeductions,
+      finalCommission
+    });
 
     return {
-      livCommission,
-      skadeCommission,
-      totalCommission,
-      salaryModelName: salaryModel.name,
-      livRate,
-      skadeRate,
+      // Viktig: Her returnerer vi provisjonen før trekk som "commission"
+      commission: totalBeforeTrekk,
+      details: {
+        baseLivCommission,
+        baseSkadeCommission,
+        totalBeforeDeductions: totalBeforeTrekk,
+        fivePercentDeduction,
+        tjenestetorgetDeduction,
+        byttDeduction,
+        otherDeductions,
+        baseSalary,
+        bonus,
+        // Endelig provisjon etter trekk
+        finalCommission
+      }
     };
   };
   
   // Filter agent data for the selected month
-  const filteredAgentData = selectedMonth 
-    ? agentData.filter(agent => agent.monthKey === selectedMonth)
-    : [];
+  const filteredAgentData = useMemo(() => {
+    if (!agentData || !selectedMonth) return [];
+    
+    return agentData.filter(agent => agent.monthKey === selectedMonth);
+  }, [agentData, selectedMonth]);
+  
+  // Calculate commissions for filtered data
+  const agentTableData = useMemo(() => {
+    if (!filteredAgentData || !salaryModels) return [];
+    
+    return filteredAgentData.map(agent => {
+      const commissionResult = calculateCommission(agent, salaryModels);
+      const approvalInfo = approvalData.find(
+        a => a.agent_name === agent.agent_name && 
+            a.month_year === agent.monthKey &&
+            a.approved === true && 
+            a.revoked !== true
+      );
+
+      // Hent anbudsdata fra approvalInfo hvis godkjent, ellers fra tenderData
+      const tenderKey = `${agent.agent_name}-${agent.monthKey}`;
+      const tenderInfo = tenderData[tenderKey] || { tjenestetorget: 0, bytt: 0, other: 0 };
+      
+      // Bestem om 5% trekk skal anvendes for godkjente agenter
+      let finalApplyFivePercent = agent.applyFivePercent;
+      
+      // For godkjente agenter, hent apply_five_percent_deduction fra godkjenningen hvis tilgjengelig
+      if (approvalInfo && approvalInfo.apply_five_percent_deduction !== undefined) {
+        finalApplyFivePercent = approvalInfo.apply_five_percent_deduction === true;
+      }
+      
+      console.log(`Agent ${agent.agent_name} endelig 5% trekk status:`, {
+        originalApplyFivePercent: agent.applyFivePercent,
+        approvalInfoStatus: approvalInfo?.apply_five_percent_deduction,
+        finalApplyFivePercent,
+        totalBeforeDeductions: commissionResult.details.totalBeforeDeductions,
+        finalCommission: commissionResult.details.finalCommission
+      });
+      
+      return {
+        ...agent,
+        ...commissionResult.details,
+        // Viktig: Her er commissionResult.commission provisjonen før trekk
+        commission: commissionResult.commission, 
+        // finalCommission er provisjonen etter trekk
+        finalCommission: commissionResult.details.finalCommission, 
+        isApproved: !!approvalInfo,
+        approvedCommission: approvalInfo?.approved_commission || null,
+        approvalInfo: approvalInfo ? {
+          ...approvalInfo,
+          tjenestetorget: parseFloat(approvalInfo.tjenestetorget) || 0,
+          bytt: parseFloat(approvalInfo.bytt) || 0,
+          other_deductions: parseFloat(approvalInfo.other_deductions) || 0,
+          apply_five_percent_deduction: approvalInfo.apply_five_percent_deduction
+        } : null,
+        // Sett endelig applyFivePercent verdi basert på beregningen ovenfor
+        applyFivePercent: finalApplyFivePercent
+      };
+    });
+  }, [filteredAgentData, salaryModels, approvalData, tenderData]);
   
   // Get approved totals for the selected month
   const approvedTotal = filteredAgentData
     .filter(agent => agent.isApproved)
-    .reduce((sum, agent) => sum + (agent.approvedCommission || 0), 0);
+    .reduce((sum, agent) => {
+      const approvedAmount = agent.approvalInfo?.approved_commission || agent.commission;
+      return sum + approvedAmount;
+    }, 0);
   
   // Get calculated totals for the selected month
   const calculatedTotal = filteredAgentData
-    .reduce((sum, agent) => sum + agent.totalCommission, 0);
+    .reduce((sum, agent) => sum + agent.commission, 0);
   
-  // Sort agents by total commission
+  // Sort agents by total commission (before deductions)
   const sortedAgents = [...filteredAgentData].sort((a, b) => 
-    b.totalCommission - a.totalCommission
+    b.commission - a.commission
   );
   
   // Group approvals by office/company
@@ -320,7 +536,7 @@ function SalesDataDashboard() {
         };
       }
       acc[company].count++;
-      acc[company].amount += parseFloat(approval.approved_commission) || 0;
+      acc[company].amount += approval.commission || 0;
       acc[company].agents.push(approval.agent_name);
       return acc;
     }, {});
@@ -367,9 +583,9 @@ function SalesDataDashboard() {
       }
       
       monthlyTotals[agent.monthKey].totalPremium += agent.totalPremium;
-      monthlyTotals[agent.monthKey].totalCommission += agent.totalCommission;
+      monthlyTotals[agent.monthKey].totalCommission += agent.commission;
       if (agent.approvedCommission) {
-        monthlyTotals[agent.monthKey].approvedCommission += agent.approvedCommission;
+        monthlyTotals[agent.monthKey].approvedCommission += agent.commission;
       }
       monthlyTotals[agent.monthKey].agentCount++;
     });
@@ -396,35 +612,43 @@ function SalesDataDashboard() {
           agentCount: 0,
           approvedAgentCount: 0,
           deductions: 0,
+          fivePercentDeductions: 0,
+          tenderDeductions: 0,
           bonus: 0,
           otherAdjustments: 0
         };
       }
       
       // Oppdater totaler
-      companyTotals[company].totalPremium += agent.totalPremium;
-      companyTotals[company].totalCommission += agent.totalCommission;
+      companyTotals[company].totalPremium += agent.totalPremium || 0;
+      companyTotals[company].totalCommission += agent.commission || 0;
       companyTotals[company].agentCount++;
       
       // Håndter godkjente provisjoner
       if (agent.isApproved) {
-        companyTotals[company].approvedCommission += agent.approvedCommission || 0;
+        companyTotals[company].approvedCommission += agent.commission || 0;
         companyTotals[company].approvedAgentCount++;
         
         // Beregn trekk og justeringer
         const tjenestetorgetDeduction = agent.tjenestetorgetDeduction || 0;
         const byttDeduction = agent.byttDeduction || 0;
         const otherDeductions = agent.otherDeductions || 0;
-        const fivePercentDeduction = (agent.skadeCommission + agent.livCommission) * 0.05;
         
+        // Beregn 5% trekk basert på agentens applyFivePercent status
+        const applyFivePercent = agent.applyFivePercent !== undefined ? agent.applyFivePercent : false;
+        const agentCommission = agent.commission || 0;
+        const fivePercentDeduction = applyFivePercent ? agentCommission * 0.05 : 0;
+        
+        companyTotals[company].tenderDeductions += tjenestetorgetDeduction + byttDeduction + otherDeductions;
+        companyTotals[company].fivePercentDeductions += fivePercentDeduction;
         companyTotals[company].deductions += tjenestetorgetDeduction + byttDeduction + otherDeductions + fivePercentDeduction;
         
         // Beregn bonus hvis aktuelt
         if (agent.bonusEnabled && agent.bonusThreshold) {
-          const totalPremium = agent.livPremium + agent.skadePremium;
+          const totalPremium = (agent.livPremium || 0) + (agent.skadePremium || 0);
           if (totalPremium >= agent.bonusThreshold) {
-            const bonusLivCommission = agent.livPremium * (agent.bonusLivRate / 100);
-            const bonusSkadeCommission = agent.skadePremium * (agent.bonusSkadeRate / 100);
+            const bonusLivCommission = (agent.livPremium || 0) * ((agent.bonusLivRate || 0) / 100);
+            const bonusSkadeCommission = (agent.skadePremium || 0) * ((agent.bonusSkadeRate || 0) / 100);
             companyTotals[company].bonus += bonusLivCommission + bonusSkadeCommission;
           }
         }
@@ -479,7 +703,19 @@ function SalesDataDashboard() {
   };
 
   const openApprovalDialog = (agent) => {
-    setSelectedAgent(agent);
+    console.log("Åpner godkjenningsdialog for agent:", {
+      name: agent.agent_name,
+      applyFivePercent: agent.applyFivePercent,
+      totalBeforeDeductions: agent.totalBeforeDeductions,
+      approvalInfo: agent.approvalInfo
+    });
+    
+    setSelectedAgent({
+      ...agent,
+      // Sikre at applyFivePercent og totalBeforeDeductions overføres korrekt
+      applyFivePercent: agent.applyFivePercent,
+      totalBeforeDeductions: agent.totalBeforeDeductions
+    });
     setApprovalDialogOpen(true);
   };
 
@@ -493,22 +729,39 @@ function SalesDataDashboard() {
     if (!selectedAgent) return;
     
     try {
+      const tenderKey = `${selectedAgent.agent_name}-${selectedAgent.monthKey}`;
+      const tenderInfo = tenderData[tenderKey] || { tjenestetorget: 0, bytt: 0, other: 0 };
+
+      console.log("Godkjenner agent med følgende data:", {
+        agent: selectedAgent.agent_name,
+        applyFivePercent: selectedAgent.applyFivePercent,
+        commission: selectedAgent.commission,
+        totalBeforeDeductions: selectedAgent.totalBeforeDeductions,
+        finalCommission: selectedAgent.finalCommission
+      });
+
       const { error } = await supabase
         .from('monthly_commission_approvals')
         .update({
           approved: true,
           approved_at: new Date().toISOString(),
           approved_by: 'Admin',
-          approved_commission: selectedAgent.approvedCommission,
+          approved_commission: selectedAgent.commission, // Dette er beregnet provisjon før trekk
           salary_model_id: selectedAgent.salaryModelId,
           approval_comment: selectedAgent.approval_comment,
-          tjenestetorget: tenderData[`${selectedAgent.agent_name}-${selectedAgent.monthKey}`]?.tjenestetorget || 0,
-          bytt: tenderData[`${selectedAgent.agent_name}-${selectedAgent.monthKey}`]?.bytt || 0,
-          other_deductions: tenderData[`${selectedAgent.agent_name}-${selectedAgent.monthKey}`]?.other || 0
+          tjenestetorget: tenderInfo.tjenestetorget,
+          bytt: tenderInfo.bytt,
+          other_deductions: tenderInfo.other,
+          apply_five_percent_deduction: selectedAgent.applyFivePercent
         })
         .eq('id', selectedAgent.approvalInfo.id);
       
       if (error) throw error;
+      
+      // Beregn 5% trekk basert på totalbeløp før trekk
+      const fivePercentDeduction = selectedAgent.applyFivePercent 
+        ? (selectedAgent.totalBeforeDeductions || 0) * 0.05 
+        : 0;
       
       // Oppdater lokal state
       setAgentData(prev => prev.map(agent => 
@@ -516,17 +769,23 @@ function SalesDataDashboard() {
           ? { 
               ...agent, 
               isApproved: true,
-              approvedCommission: selectedAgent.approvedCommission,
+              commission: selectedAgent.commission, // Provisjon før trekk
+              finalCommission: selectedAgent.finalCommission, // Provisjon etter trekk
               salaryModelId: selectedAgent.salaryModelId,
               approvalInfo: {
-                ...agent.approvalInfo,
-                approved_commission: selectedAgent.approvedCommission,
+                ...selectedAgent.approvalInfo,
+                approved_commission: selectedAgent.commission, // Dette er beregnet provisjon før trekk
                 salary_model_id: selectedAgent.salaryModelId,
                 approval_comment: selectedAgent.approval_comment,
-                tjenestetorget: tenderData[`${selectedAgent.agent_name}-${selectedAgent.monthKey}`]?.tjenestetorget || 0,
-                bytt: tenderData[`${selectedAgent.agent_name}-${selectedAgent.monthKey}`]?.bytt || 0,
-                other_deductions: tenderData[`${selectedAgent.agent_name}-${selectedAgent.monthKey}`]?.other || 0
-              }
+                tjenestetorget: tenderInfo.tjenestetorget,
+                bytt: tenderInfo.bytt,
+                other_deductions: tenderInfo.other,
+                apply_five_percent_deduction: selectedAgent.applyFivePercent
+              },
+              // Pass på at applyFivePercent er oppdatert i agent-objektet
+              applyFivePercent: selectedAgent.applyFivePercent,
+              fivePercentDeduction: fivePercentDeduction,
+              totalBeforeDeductions: selectedAgent.totalBeforeDeductions
             }
           : agent
       ));
@@ -535,6 +794,30 @@ function SalesDataDashboard() {
     } catch (error) {
       console.error('Error updating approval:', error);
     }
+  };
+  
+  // Oppdater getAgentTableData funksjonen
+  const getAgentTableData = () => {
+    if (!selectedMonth) return [];
+    
+    return agentData
+      .filter(agent => agent.monthKey === selectedMonth)
+      .map(agent => {
+        const tenderKey = `${agent.agent_name}-${agent.monthKey}`;
+        const tenderInfo = tenderData[tenderKey] || { tjenestetorget: 0, bytt: 0, other: 0 };
+        
+        // Beregn total anbud
+        const totalTender = tenderInfo.tjenestetorget + tenderInfo.bytt + tenderInfo.other;
+        
+        return {
+          ...agent,
+          tenderTjenestetorget: tenderInfo.tjenestetorget,
+          tenderBytt: tenderInfo.bytt,
+          tenderOther: tenderInfo.other,
+          totalTender: totalTender
+        };
+      })
+      .sort((a, b) => b.commission - a.commission);
   };
   
   if (loading) {
@@ -622,7 +905,7 @@ function SalesDataDashboard() {
                 <ReceiptLong color="primary" />
               </Box>
               <Typography variant="h5" component="div" fontWeight="bold">
-                {filteredAgentData.reduce((sum, agent) => sum + agent.totalPremium, 0).toLocaleString('no-NO')} kr
+                {filteredAgentData.reduce((sum, agent) => sum + (agent.totalPremium || 0), 0).toLocaleString('no-NO')} kr
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 for {selectedMonth ? formatMonth(selectedMonth) : 'valgt periode'}
@@ -815,6 +1098,8 @@ function SalesDataDashboard() {
                       <TableCell align="right">Godkjent</TableCell>
                       <TableCell align="right">Totalt salg</TableCell>
                       <TableCell align="right">Beregnet provisjon</TableCell>
+                      <TableCell align="right">5% trekk</TableCell>
+                      <TableCell align="right">Anbudstrekk</TableCell>
                       <TableCell align="right">Godkjent provisjon</TableCell>
                       <TableCell align="right">Differanse</TableCell>
                       <TableCell align="center">Status</TableCell>
@@ -833,22 +1118,33 @@ function SalesDataDashboard() {
                             ({company.approvalRate.toFixed(1)}%)
                           </Typography>
                         </TableCell>
-                        <TableCell align="right">{company.totalPremium.toLocaleString('no-NO')} kr</TableCell>
-                        <TableCell align="right">{company.totalCommission.toLocaleString('no-NO')} kr</TableCell>
+                        <TableCell align="right">{(company.totalPremium || 0).toLocaleString('no-NO')} kr</TableCell>
+                        <TableCell align="right">{(company.totalCommission || 0).toLocaleString('no-NO')} kr</TableCell>
+                        <TableCell align="right">
+                          {company.fivePercentDeductions > 0 ? 
+                            `${(company.fivePercentDeductions || 0).toLocaleString('no-NO')} kr` : 
+                            '0 kr'}
+                        </TableCell>
+                        <TableCell align="right">
+                          {company.tenderDeductions > 0 ? 
+                            `${(company.tenderDeductions || 0).toLocaleString('no-NO')} kr` : 
+                            '0 kr'}
+                        </TableCell>
                         <TableCell align="right" sx={{ position: 'relative' }}>
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5 }}>
-                            {company.approvedCommission?.toLocaleString('nb-NO')} kr
+                            {(company.approvedCommission || 0)?.toLocaleString('nb-NO')} kr
                             {company.approvedCommission !== company.totalCommission && (
                               <Tooltip
                                 title={
                                   <Box>
                                     <Typography variant="body2" fontWeight="bold">Detaljer:</Typography>
-                                    <Typography variant="body2">Beregnet provisjon: {company.totalCommission?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2">Trekk: {company.deductions?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2">Bonus: {company.bonus?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2">Andre justeringer: {company.otherAdjustments?.toLocaleString('nb-NO')} kr</Typography>
+                                    <Typography variant="body2">Beregnet provisjon: {(company.totalCommission || 0)?.toLocaleString('nb-NO')} kr</Typography>
+                                    <Typography variant="body2">5% trekk: {(company.fivePercentDeductions || 0)?.toLocaleString('nb-NO')} kr</Typography>
+                                    <Typography variant="body2">Anbudstrekk: {(company.tenderDeductions || 0)?.toLocaleString('nb-NO')} kr</Typography>
+                                    <Typography variant="body2">Totalt trekk: {(company.deductions || 0)?.toLocaleString('nb-NO')} kr</Typography>
+                                    <Typography variant="body2">Bonus: {(company.bonus || 0)?.toLocaleString('nb-NO')} kr</Typography>
                                     <Typography variant="body2" fontWeight="bold">
-                                      Total provisjon: {company.approvedCommission?.toLocaleString('nb-NO')} kr
+                                      Total provisjon: {(company.approvedCommission || 0)?.toLocaleString('nb-NO')} kr
                                     </Typography>
                                   </Box>
                                 }
@@ -870,10 +1166,10 @@ function SalesDataDashboard() {
                                 : 'error.main'
                           }}
                         >
-                          {`${company.difference > 0 ? '+' : ''}${company.difference.toLocaleString('no-NO')} kr`}
+                          {`${company.difference > 0 ? '+' : ''}${(company.difference || 0).toLocaleString('no-NO')} kr`}
                           <br />
                           <Typography variant="caption">
-                            {`(${company.percentDiff > 0 ? '+' : ''}${company.percentDiff.toFixed(1)}%)`}
+                            {`(${company.percentDiff > 0 ? '+' : ''}${(company.percentDiff || 0).toFixed(1)}%)`}
                           </Typography>
                         </TableCell>
                         <TableCell align="center">
@@ -919,92 +1215,127 @@ function SalesDataDashboard() {
                 <Table size="small">
                   <TableHead>
                     <TableRow sx={{ backgroundColor: theme.palette.action.hover }}>
-                      <TableCell width="15%">Agent</TableCell>
-                      <TableCell width="12%">Kontor</TableCell>
-                      <TableCell width="12%">Lønnstrinn</TableCell>
-                      <TableCell align="right" width="12%">Liv-salg</TableCell>
-                      <TableCell align="right" width="12%">Skade-salg</TableCell>
-                      <TableCell align="right" width="12%">Totalt salg</TableCell>
-                      <TableCell align="right" width="12%">Beregnet provisjon</TableCell>
-                      <TableCell align="right" width="13%">Godkjent provisjon</TableCell>
-                      <TableCell align="center" width="10%">Status</TableCell>
-                      <TableCell align="right" width="10%">Handling</TableCell>
+                      <TableCell>Agent</TableCell>
+                      <TableCell>Kontor</TableCell>
+                      <TableCell>Lønnstrinn</TableCell>
+                      <TableCell align="right">Liv-salg</TableCell>
+                      <TableCell align="right">Skade-salg</TableCell>
+                      <TableCell align="right">Totalt salg</TableCell>
+                      <TableCell align="right">Beregnet provisjon</TableCell>
+                      <TableCell align="right">5% trekk</TableCell>
+                      <TableCell align="right">Anbudstrekk</TableCell>
+                      <TableCell align="right">Godkjent provisjon</TableCell>
+                      <TableCell align="center">Status</TableCell>
+                      <TableCell align="right">Handling</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {sortedAgents.map((agent) => (
-                      <TableRow key={`${agent.agent_name}-${agent.monthKey}`} hover>
-                        <TableCell>{agent.agent_name}</TableCell>
-                        <TableCell>{agent.agent_company || 'Ukjent'}</TableCell>
-                        <TableCell>
-                          <Tooltip title={`Liv: ${agent.livRate}%, Skade: ${agent.skadeRate}%`}>
-                            <Chip 
-                              label={agent.salaryModelName || 'Ukjent'} 
-                              size="small" 
-                              color="primary"
-                              variant="outlined"
-                              sx={{ minWidth: '100px' }}
-                            />
-                          </Tooltip>
-                        </TableCell>
-                        <TableCell align="right">{agent.livPremium.toLocaleString('no-NO')} kr</TableCell>
-                        <TableCell align="right">{agent.skadePremium.toLocaleString('no-NO')} kr</TableCell>
-                        <TableCell align="right">{agent.totalPremium.toLocaleString('no-NO')} kr</TableCell>
-                        <TableCell align="right">
-                          <Typography variant="body2">
-                            {agent.totalCommission.toLocaleString('nb-NO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Typography variant="body2">
-                            {agent.approvedCommission?.toLocaleString('nb-NO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr
-                          </Typography>
-                        </TableCell>
-                        <TableCell align="center">
-                          {agent.isApproved ? (
-                            <Chip 
-                              label="Godkjent" 
-                              color="success" 
-                              size="small" 
-                              icon={<CheckCircle />}
-                              sx={{ minWidth: '90px' }}
-                            />
-                          ) : (
-                            <Chip 
-                              label="Ikke godkjent" 
-                              color="default" 
-                              size="small" 
-                              icon={<Cancel />}
-                              sx={{ minWidth: '90px' }}
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell align="right">
-                          <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end' }}>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="primary"
-                              onClick={() => openApprovalDialog(agent)}
-                              sx={{ minWidth: '80px' }}
-                            >
-                              Endre
-                            </Button>
-                            {agent.isApproved && (
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="error"
-                                onClick={() => openRevokeDialog(agent)}
-                                sx={{ minWidth: '80px' }}
-                              >
-                                Trekk tilbake
-                              </Button>
+                    {sortedAgents.map((agent) => {
+                      const tenderKey = `${agent.agent_name}-${selectedMonth}`;
+                      const tenderInfo = tenderData[tenderKey] || { tjenestetorget: 0, bytt: 0, other: 0 };
+                      const salaryModel = salaryModels.find(model => model.id === agent.salary_model_id);
+                      
+                      // Logg for debugging
+                      console.log(`Agent ${agent.agent_name} applyFivePercent:`, {
+                        name: agent.agent_name,
+                        applyFivePercent: agent.applyFivePercent,
+                        isApproved: agent.isApproved,
+                        approvalInfo: agent.approvalInfo
+                      });
+                      
+                      return (
+                        <TableRow key={`${agent.agent_name}-${agent.monthKey}`} hover>
+                          <TableCell>{agent.agent_name}</TableCell>
+                          <TableCell>{agent.agent_company || 'Ukjent'}</TableCell>
+                          <TableCell>
+                            {salaryModel ? (
+                              <Tooltip title={`Liv: ${salaryModel.commission_liv || 0}%, Skade: ${salaryModel.commission_skade || 0}%`}>
+                                <Chip 
+                                  label={salaryModel.name} 
+                                  size="small" 
+                                  color="primary"
+                                  variant="outlined"
+                                />
+                              </Tooltip>
+                            ) : (
+                              <Tooltip title="Lønnstrinn 1 (standard)">
+                                <Chip 
+                                  label="Lønnstrinn 1" 
+                                  size="small" 
+                                  color="default"
+                                  variant="outlined"
+                                />
+                              </Tooltip>
                             )}
-                          </Box>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                          </TableCell>
+                          <TableCell align="right">{formatCurrency(agent.livPremium || 0)}</TableCell>
+                          <TableCell align="right">{formatCurrency(agent.skadePremium || 0)}</TableCell>
+                          <TableCell align="right">{formatCurrency(agent.totalPremium || 0)}</TableCell>
+                          <TableCell align="right">{formatCurrency(agent.commission || 0)}</TableCell>
+                          <TableCell align="right">
+                            {agent.applyFivePercent ? (
+                              <Tooltip title="5% trekk er aktivt basert på ansettelsestid eller manuell innstilling">
+                                <Box sx={{ color: theme.palette.warning.main }}>
+                                  {formatCurrency(agent.commission * 0.05)}
+                                </Box>
+                              </Tooltip>
+                            ) : (
+                              <Box sx={{ color: theme.palette.text.secondary }}>
+                                0 kr
+                              </Box>
+                            )}
+                          </TableCell>
+                          <TableCell align="right">
+                            {agent.isApproved ? 
+                              formatCurrency(
+                                (parseFloat(agent.approvalInfo?.tjenestetorget || 0) || 0) + 
+                                (parseFloat(agent.approvalInfo?.bytt || 0) || 0) + 
+                                (parseFloat(agent.approvalInfo?.other_deductions || 0) || 0)
+                              ) : 
+                              formatCurrency(
+                                (parseFloat(tenderInfo?.tjenestetorget || 0) || 0) + 
+                                (parseFloat(tenderInfo?.bytt || 0) || 0) + 
+                                (parseFloat(tenderInfo?.other || 0) || 0)
+                              )
+                            }
+                          </TableCell>
+                          <TableCell align="right">
+                            {agent.isApproved ? 
+                              formatCurrency(agent.approvalInfo?.approved_commission || agent.commission || 0) : 
+                              formatCurrency(agent.finalCommission || 0)}
+                          </TableCell>
+                          <TableCell align="center">
+                            {agent.isApproved ? (
+                              <Chip 
+                                icon={<CheckCircle />} 
+                                label="Godkjent" 
+                                color="success" 
+                                size="small"
+                              />
+                            ) : (
+                              <Chip 
+                                icon={<Cancel />} 
+                                label="Ikke godkjent" 
+                                color="error" 
+                                size="small"
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell align="right">
+                            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                              <Button
+                                variant={agent.isApproved ? "outlined" : "contained"}
+                                color={agent.isApproved ? "error" : "primary"}
+                                size="small"
+                                onClick={() => agent.isApproved ? openRevokeDialog(agent) : openApprovalDialog(agent)}
+                              >
+                                {agent.isApproved ? 'Tilbakekall' : 'Godkjenn'}
+                              </Button>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -1029,12 +1360,12 @@ function SalesDataDashboard() {
                   fullWidth
                   label="Godkjent provisjon"
                   type="number"
-                  value={selectedAgent.approvedCommission || ''}
+                  value={selectedAgent.commission || ''}
                   onChange={(e) => {
                     const newValue = parseFloat(e.target.value);
                     setSelectedAgent(prev => ({
                       ...prev,
-                      approvedCommission: newValue
+                      commission: newValue
                     }));
                   }}
                   InputProps={{
@@ -1090,42 +1421,7 @@ function SalesDataDashboard() {
           <Button 
             variant="contained" 
             color="primary"
-            onClick={async () => {
-              try {
-                const { error } = await supabase
-                  .from('monthly_commission_approvals')
-                  .update({
-                    approved_commission: selectedAgent.approvedCommission,
-                    salary_model_id: selectedAgent.salaryModelId,
-                    approval_comment: selectedAgent.approval_comment,
-                    updated_at: new Date().toISOString()
-                  })
-                  .eq('id', selectedAgent.approvalInfo.id);
-                
-                if (error) throw error;
-                
-                // Oppdater lokal state
-                setAgentData(prev => prev.map(agent => 
-                  agent.agent_name === selectedAgent.agent_name
-                    ? { 
-                        ...agent, 
-                        approvedCommission: selectedAgent.approvedCommission,
-                        salaryModelId: selectedAgent.salaryModelId,
-                        approvalInfo: {
-                          ...agent.approvalInfo,
-                          approved_commission: selectedAgent.approvedCommission,
-                          salary_model_id: selectedAgent.salaryModelId,
-                          approval_comment: selectedAgent.approval_comment
-                        }
-                      }
-                    : agent
-                ));
-                
-                closeDialogs();
-              } catch (error) {
-                console.error('Error updating approval:', error);
-              }
-            }}
+            onClick={handleApproval}
           >
             Lagre endringer
           </Button>

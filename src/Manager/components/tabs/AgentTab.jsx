@@ -35,13 +35,14 @@ import {
   Cancel,
   Warning,
   CheckCircle,
-  Refresh
+  Refresh,
+  BugReport
 } from '@mui/icons-material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { format, differenceInMonths } from 'date-fns';
 import { supabase } from '../../../supabaseClient';
 
-const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, salaryModels, openBatchApproval }) => {
+const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, salaryModels, openBatchApproval, managerData }) => {
   const theme = useTheme();
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: "totalPremium", direction: "desc" });
@@ -66,10 +67,10 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
   const initializedRef = useRef(false);
   const updatingParentRef = useRef(false);
   const previousPropsRef = useRef(null);
+  const previousAgentPerformanceRef = useRef(null);
 
   // Memoization av agentPerformance for å unngå unødvendige oppdateringer
   const memoizedAgentPerformance = useMemo(() => agentPerformance, [
-    // Kun inkluder nødvendige feltene for sammenligning
     agentPerformance ? JSON.stringify(agentPerformance.map(a => ({
       id: a.id,
       name: a.name,
@@ -124,6 +125,17 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
             model.id === parseInt(employeeMatch.salary_model_id)
           );
           
+          // Sjekk ansettelsestid og bestem om 5% trekk skal være på
+          let shouldApplyFivePercent = false;
+          if (employeeMatch.hire_date) {
+            const hireDate = new Date(employeeMatch.hire_date);
+            const today = new Date();
+            const monthsEmployed = differenceInMonths(today, hireDate);
+            // Hvis mindre enn 9 måneder: slå på 5% trekk
+            shouldApplyFivePercent = monthsEmployed < 9;
+            console.log(`${employeeMatch.name} har vært ansatt i ${monthsEmployed} måneder. 5% trekk: ${shouldApplyFivePercent}`);
+          }
+          
           return {
             ...agent,
             skadeCommissionRate: agent.skadeCommissionRate || (salaryModel ? salaryModel.commission_skade : 0),
@@ -138,13 +150,14 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
               agent.applyFivePercent : 
               (employeeMatch.apply_five_percent_deduction !== null ? 
                 employeeMatch.apply_five_percent_deduction : 
-                true),
+                shouldApplyFivePercent),
             // Hent godkjenningsstatus fra monthly_commission_approvals
             isApproved: approvalMatch?.approved || false,
             approvalStatus: approvalMatch ? 'approved' : 'pending',
             lastApprovalAttempt: approvalMatch?.approved_at,
             lastApprovalResult: approvalMatch?.approved ? 'success' : 'pending',
-            approvalMetadata: approvalMatch?.approval_metadata || null
+            approvalMetadata: approvalMatch?.approval_metadata || null,
+            hireDate: employeeMatch.hire_date || null
           };
         }
         return agent;
@@ -170,16 +183,35 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     }
     
     try {
+      // Sjekk om dataene faktisk har endret seg
+      const currentDataString = JSON.stringify(data.map(a => ({
+        id: a.id,
+        name: a.name,
+        isApproved: a.isApproved
+      })));
+      
+      const previousDataString = JSON.stringify(previousAgentPerformanceRef.current?.map(a => ({
+        id: a.id,
+        name: a.name,
+        isApproved: a.isApproved
+      })));
+
+      if (currentDataString === previousDataString) {
+        return; // Ingen endringer, ikke oppdater
+      }
+
       // Sørg for at vi ikke sender undefined isApproved
       const sanitizedData = data.map(agent => ({
         ...agent,
-        isApproved: agent.isApproved || false // Konverter undefined til false
+        isApproved: agent.isApproved || false
       }));
       
       console.log("Updating parent with data, isApproved status:", 
         sanitizedData.map(a => ({name: a.name, isApproved: a.isApproved})));
+      
       updatingParentRef.current = true;
       updateAgentPerformance(sanitizedData);
+      previousAgentPerformanceRef.current = sanitizedData;
     } finally {
       updatingParentRef.current = false;
     }
@@ -200,66 +232,34 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
       return;
     }
 
-    // Sjekk om det er endringer i godkjenningsstatus
-    if (localAgentData.length > 0) {
-      const agentsWithChangedStatus = [];
-      
-      // Sammenligne agentene og finne de som har endret godkjenningsstatus
-      memoizedAgentPerformance.forEach(parentAgent => {
-        const localAgent = localAgentData.find(a => 
-          (a.id === parentAgent.id) || (a.name === parentAgent.name)
-        );
-        
-        // Håndter undefined status ved å beholde eksisterende status
-        const newStatus = parentAgent.isApproved === undefined ? localAgent?.isApproved : parentAgent.isApproved;
-        
-        if (localAgent && localAgent.isApproved !== newStatus) {
-          agentsWithChangedStatus.push({
-            name: parentAgent.name,
-            oldStatus: localAgent.isApproved,
-            newStatus: newStatus
-          });
-        }
-      });
-      
-      if (agentsWithChangedStatus.length > 0) {
-        console.log("Detected approval changes from parent for agents:", agentsWithChangedStatus);
-        
-        // Kun oppdater isApproved-feltet for agentene som har endret status
-        setLocalAgentData(prev => prev.map(localAgent => {
-          const parentAgent = memoizedAgentPerformance.find(a => 
-            (a.id === localAgent.id) || (a.name === localAgent.name)
-          );
-          
-          // Håndter undefined status ved å beholde eksisterende status
-          const newStatus = parentAgent?.isApproved === undefined ? localAgent.isApproved : parentAgent.isApproved;
-          
-          if (parentAgent && localAgent.isApproved !== newStatus) {
-            return { 
-              ...localAgent, 
-              isApproved: newStatus,
-              pendingApproval: false, // Fjern pending status hvis satt
-              approvalStatus: newStatus ? 'approved' : 'pending' // Oppdater approvalStatus basert på ny status
-            };
-          }
-          return localAgent;
-        }));
-      }
-    }
-  }, [memoizedAgentPerformance, localAgentData, isInitialLoad]);
+    // Sjekk om det faktisk er endringer i dataene
+    const currentDataString = JSON.stringify(memoizedAgentPerformance.map(a => ({
+      id: a.id,
+      name: a.name,
+      isApproved: a.isApproved
+    })));
+    
+    const previousDataString = JSON.stringify(previousAgentPerformanceRef.current?.map(a => ({
+      id: a.id,
+      name: a.name,
+      isApproved: a.isApproved
+    })));
 
-  // Legg til en separat useEffect for å oppdatere parent BARE når det er nødvendig
-  useEffect(() => {
-    // Kun oppdater parent når initialiseringen er ferdig
-    if (!isInitialLoad && initializedRef.current && !updatingParentRef.current) {
-      // Bruker timeouts for å sikre at vi ikke havner i en uendelig oppdateringsløkke
-      const timerId = setTimeout(() => {
-        updateParent();
-      }, 100);
-      
-      return () => clearTimeout(timerId);
+    if (currentDataString === previousDataString) {
+      return; // Ingen endringer, ikke oppdater
     }
-  }, [updateParent, isInitialLoad]);
+
+    // Oppdater localAgentData kun hvis det er faktiske endringer
+    setLocalAgentData(prevData => {
+      const newData = memoizedAgentPerformance.map(agent => {
+        const existingAgent = prevData.find(a => a.id === agent.id);
+        return existingAgent ? { ...existingAgent, ...agent } : agent;
+      });
+      return newData;
+    });
+
+    previousAgentPerformanceRef.current = memoizedAgentPerformance;
+  }, [memoizedAgentPerformance, isInitialLoad]);
 
   const getSortIcon = (key) => {
     if (sortConfig.key !== key) return null;
@@ -277,7 +277,24 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
   const handleOpenEditDialog = (agent) => {
     const salaryModel = salaryModels.find(model => model.id === agent.salaryModelId);
     
-    setEditingAgent(agent);
+    // Sjekk ansettelsestid
+    const hireDate = agent.hireDate ? new Date(agent.hireDate) : null;
+    const monthsEmployed = hireDate ? differenceInMonths(new Date(), hireDate) : null;
+    const newHire = monthsEmployed !== null && monthsEmployed < 9;
+    
+    console.log(`Åpner redigeringsdialog for ${agent.name}:`, {
+      hireDate: agent.hireDate,
+      monthsEmployed,
+      newHire,
+      currentFivePercentSetting: agent.applyFivePercent
+    });
+    
+    setEditingAgent({
+      ...agent,
+      monthsEmployed,
+      isNewHire: newHire
+    });
+    
     setEditValues({
       skadeCommissionRate: agent.overriddenSkadeRate ? agent.skadeCommissionRate : (salaryModel ? salaryModel.commission_skade : ""),
       livCommissionRate: agent.overriddenLivRate ? agent.livCommissionRate : (salaryModel ? salaryModel.commission_liv : ""),
@@ -289,10 +306,9 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
       sickLeave: agent.sickLeave || "",
       applyFivePercent: agent.applyFivePercent !== undefined 
         ? agent.applyFivePercent 
-        : agent.hireDate
-          ? differenceInMonths(new Date(), new Date(agent.hireDate)) < 9
-          : true
+        : newHire  // Sett 5% trekk til true hvis nylig ansatt (under 9 måneder)
     });
+    
     setEditDialogOpen(true);
   };
 
@@ -310,91 +326,114 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     });
   };
 
-  const handleSaveChanges = async () => {
-    if (!editingAgent) return;
-    
-    setSaveLoading(true);
-    setSaveError(null);
-    
+  const handleSubmitEdit = async () => {
+    setIsLoading(true);
     try {
-      const { data: employeeData, error: findError } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('name', editingAgent.name)
-        .single();
+      // Validering av input
+      const livRate = parseFloat(editValues.livCommissionRate);
+      const skadeRate = parseFloat(editValues.skadeCommissionRate);
+      const tjenestetorgetDeduction = parseFloat(editValues.tjenestetorgetDeduction || 0);
+      const byttDeduction = parseFloat(editValues.byttDeduction || 0);
+      const otherDeductions = parseFloat(editValues.otherDeductions || 0);
+      const baseSalary = parseFloat(editValues.baseSalary || 0);
+      const bonus = parseFloat(editValues.bonus || 0);
+      const applyFivePercent = editValues.applyFivePercent;
       
-      if (findError) {
-        console.error('Error finding employee:', findError);
-        throw new Error('Kunne ikke finne ansatt i databasen');
-      }
+      // Beregne provisjon på nytt med nye verdier
+      const updatedAgent = {
+        ...editingAgent,
+        skadeCommissionRate: skadeRate,
+        livCommissionRate: livRate,
+        overriddenSkadeRate: true, // Så vi vet at dette er overskrevet
+        overriddenLivRate: true,
+        tjenestetorgetDeduction,
+        byttDeduction,
+        otherDeductions,
+        baseSalary,
+        bonus,
+        applyFivePercent,
+        sickLeave: editValues.sickLeave
+      };
       
-      if (!employeeData) {
-        throw new Error('Ingen ansatt funnet med dette navnet');
-      }
-      
-      const { error: updateError } = await supabase
-        .from('employees')
-        .update({ 
-          apply_five_percent_deduction: editValues.applyFivePercent,
-          tjenestetorget_deduction: parseFloat(editValues.tjenestetorgetDeduction) || 0,
-          bytt_deduction: parseFloat(editValues.byttDeduction) || 0,
-          other_deductions: parseFloat(editValues.otherDeductions) || 0,
-          base_salary: parseFloat(editValues.baseSalary) || 0,
-          bonus: parseFloat(editValues.bonus) || 0,
-          sick_leave: editValues.sickLeave || null,
-          commission_skade_override: parseFloat(editValues.skadeCommissionRate) || null,
-          commission_liv_override: parseFloat(editValues.livCommissionRate) || null
-        })
-        .eq('id', employeeData.id);
-      
-      if (updateError) {
-        throw new Error(`Kunne ikke oppdatere ansattdata: ${updateError.message}`);
-      }
-      
-      const updatedAgentPerformance = localAgentData.map(agent => 
-        agent.name === editingAgent.name 
-          ? { 
-              ...agent, 
-              applyFivePercent: editValues.applyFivePercent,
-              skadeCommissionRate: parseFloat(editValues.skadeCommissionRate) || agent.skadeCommissionRate,
-              livCommissionRate: parseFloat(editValues.livCommissionRate) || agent.livCommissionRate,
-              tjenestetorgetDeduction: parseFloat(editValues.tjenestetorgetDeduction) || 0,
-              byttDeduction: parseFloat(editValues.byttDeduction) || 0,
-              otherDeductions: parseFloat(editValues.otherDeductions) || 0,
-              baseSalary: parseFloat(editValues.baseSalary) || 0,
-              bonus: parseFloat(editValues.bonus) || 0,
-              sickLeave: editValues.sickLeave || "",
-              overriddenSkadeRate: true,
-              overriddenLivRate: true,
-              overriddenDeductions: true,
-              isApproved: editingAgent.isApproved,
-              totalCommission: calculateTotalCommission({
-                ...agent,
-                applyFivePercent: editValues.applyFivePercent,
-                skadeCommissionRate: parseFloat(editValues.skadeCommissionRate) || agent.skadeCommissionRate,
-                livCommissionRate: parseFloat(editValues.livCommissionRate) || agent.livCommissionRate,
-                tjenestetorgetDeduction: parseFloat(editValues.tjenestetorgetDeduction) || 0,
-                byttDeduction: parseFloat(editValues.byttDeduction) || 0,
-                otherDeductions: parseFloat(editValues.otherDeductions) || 0
-              }).total
-            } 
-          : agent
+      // Beregne ny provisjon
+      const totalBeforeDeductions = (
+        updatedAgent.skadePremium * skadeRate / 100 +
+        updatedAgent.livPremium * livRate / 100
       );
       
-      setLocalAgentData(updatedAgentPerformance);
+      const totalWithBonus = totalBeforeDeductions + (bonus || 0);
       
-      setTimeout(() => {
-        updateParent();
-      }, 0);
+      // Legg til 5% trekk hvis det er aktivert
+      const fivePercentDeduction = applyFivePercent ? totalWithBonus * 0.05 : 0;
       
-      console.log("Changes saved successfully for agent:", editingAgent.name);
+      // Beregne total provisjon
+      const commission = totalWithBonus - 
+        tjenestetorgetDeduction - 
+        byttDeduction - 
+        otherDeductions - 
+        fivePercentDeduction;
+
+      console.log('Oppdatert agent provisjonsdata:', {
+        agent: updatedAgent.name,
+        totalBeforeDeductions,
+        totalWithBonus,
+        applyFivePercent,
+        fivePercentDeduction,
+        otherDeductions: tjenestetorgetDeduction + byttDeduction + otherDeductions,
+        finalCommission: commission
+      });
       
-      handleCloseEditDialog();
+      updatedAgent.commission = commission;
+      
+      // Oppdater agenten i databasen
+      const { data, error } = await supabase
+        .from('agents')
+        .update({
+          skade_commission_rate: skadeRate,
+          liv_commission_rate: livRate,
+          overridden_liv_rate: true,
+          overridden_skade_rate: true,
+          tjenestetorget_deduction: tjenestetorgetDeduction,
+          bytt_deduction: byttDeduction,
+          other_deductions: otherDeductions,
+          base_salary: baseSalary,
+          bonus: bonus,
+          apply_five_percent: applyFivePercent,
+          sick_leave: editValues.sickLeave
+        })
+        .eq('id', editingAgent.id);
+        
+      if (error) {
+        console.error('Feil ved oppdatering av agent:', error);
+        throw error;
+      }
+      
+      // Oppdate agent i lokal state
+      setAgentPerformance(prevAgents => {
+        return prevAgents.map(agent => {
+          if (agent.id === editingAgent.id) {
+            return updatedAgent;
+          }
+          return agent;
+        });
+      });
+      
+      setEditDialogOpen(false);
+      setSnackbarInfo({
+        open: true,
+        message: `${editingAgent.name} oppdatert med suksess`,
+        severity: 'success'
+      });
+      
     } catch (error) {
-      console.error('Error saving changes:', error);
-      setSaveError(error.message);
+      console.error('Feil ved håndtering av agentredigering:', error);
+      setSnackbarInfo({
+        open: true,
+        message: `Feil ved oppdatering: ${error.message}`,
+        severity: 'error'
+      });
     } finally {
-      setSaveLoading(false);
+      setIsLoading(false);
     }
   };
 
@@ -442,47 +481,47 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     }
   };
 
-  const sortedAgents = () => {
-    if (!localAgentData || localAgentData.length === 0) {
+  const sortedAgents = useMemo(() => {
+    if (!agentPerformance || agentPerformance.length === 0) {
+      console.log("Ingen agentdata tilgjengelig");
       return [];
     }
     
-    // Filter basert på søk, men behold både godkjente og ikke-godkjente agenter
-    const filteredAgents = localAgentData.filter(agent => {
-      if (!agent || !agent.name) return false;
-      return agent.name.toLowerCase().includes(searchTerm.toLowerCase());
-    });
-    
-    return [...filteredAgents].sort((a, b) => {
-      // Sorter alltid godkjente agenter sist
-      if (a.isApproved !== b.isApproved) {
-        return a.isApproved ? 1 : -1;
-      }
+    // Filtrer ut agenter basert på søkeord
+    let filteredAgents = agentPerformance.filter(agent => {
+      const matchesSearch = !searchTerm || 
+        agent.name.toLowerCase().includes(searchTerm.toLowerCase());
       
-      // Hvis begge agenter har samme godkjenningsstatus, 
-      // sorter etter brukerens valgte sorteringskriterie
-      if (sortConfig.key === 'name') {
-        return sortConfig.direction === 'asc' 
+      // Logg agentdata for debugging
+      console.log(`Agent ${agent.name}:`, {
+        totalPremium: agent.totalPremium,
+        isApproved: agent.isApproved,
+        manager_approved: agent.manager_approved,
+        admin_approved: agent.admin_approved,
+        approvalStatus: agent.approvalStatus
+      });
+
+      return matchesSearch;
+    });
+
+    // Sorter agentene
+    filteredAgents.sort((a, b) => {
+      if (sortConfig.key === "name") {
+        return sortConfig.direction === "asc" 
           ? a.name.localeCompare(b.name) 
           : b.name.localeCompare(a.name);
       }
       
-      if (sortConfig.key === 'position' || sortConfig.key === 'salaryModelName') {
-        const aValue = a[sortConfig.key] || '';
-        const bValue = b[sortConfig.key] || '';
-        return sortConfig.direction === 'asc' 
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue);
-      }
+      const aValue = parseFloat(a[sortConfig.key]) || 0;
+      const bValue = parseFloat(b[sortConfig.key]) || 0;
       
-      const aValue = a[sortConfig.key] !== undefined ? a[sortConfig.key] : 0;
-      const bValue = b[sortConfig.key] !== undefined ? b[sortConfig.key] : 0;
-      
-      return sortConfig.direction === 'asc' 
+      return sortConfig.direction === "asc" 
         ? aValue - bValue
         : bValue - aValue;
     });
-  };
+
+    return filteredAgents;
+  }, [agentPerformance, searchTerm, sortConfig]);
 
   const calculateTotalCommission = (agent) => {
     const skadeCommission = agent.skadePremium * (agent.skadeCommissionRate / 100) || 0;
@@ -490,20 +529,43 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     
     const totalBeforeDeductions = skadeCommission + livCommission;
     
+    // Legg til bonus hvis det finnes
+    const bonusAmount = agent.bonusAmount || 0;
+    const totalWithBonus = totalBeforeDeductions + bonusAmount;
+    
+    // Beregn trekk
     const tjenestetorgetDeduction = parseFloat(agent.tjenestetorgetDeduction) || 0;
     const byttDeduction = parseFloat(agent.byttDeduction) || 0;
     const otherDeductions = parseFloat(agent.otherDeductions) || 0;
     
-    const fivePercentDeduction = agent.applyFivePercent ? totalBeforeDeductions * 0.05 : 0;
+    // Anvendelse av 5% trekk hvis agent er nylig ansatt (under 9 måneder)
+    const fivePercentDeduction = agent.applyFivePercent ? totalWithBonus * 0.05 : 0;
     
-    const totalCommission = totalBeforeDeductions - tjenestetorgetDeduction - byttDeduction - otherDeductions - fivePercentDeduction;
+    console.log(`Beregner provisjon for ${agent.name}:`, {
+      skadePremium: agent.skadePremium,
+      livPremium: agent.livPremium,
+      skadeCommission,
+      livCommission,
+      bonusAmount,
+      totalBeforeDeductions,
+      totalWithBonus,
+      applyFivePercent: agent.applyFivePercent,
+      fivePercentDeduction,
+      tjenestetorgetDeduction,
+      byttDeduction,
+      otherDeductions
+    });
+    
+    const totalCommission = totalWithBonus - fivePercentDeduction - tjenestetorgetDeduction - byttDeduction - otherDeductions;
     
     return {
       total: totalCommission,
       details: {
         skadeCommission,
         livCommission,
+        bonusAmount,
         totalBeforeDeductions,
+        totalWithBonus,
         tjenestetorgetDeduction,
         byttDeduction, 
         otherDeductions,
@@ -512,182 +574,187 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     };
   };
 
-  const handleOpenBatchApprovalClick = async (agent) => {
-    console.log("Opening batch approval for agent:", agent);
-    
-    // Sjekk om agenten allerede er i godkjenningsprosess
-    if (pendingApproval === (agent.id || agent.name)) {
-      console.log("Agent is already in approval process");
-      return;
-    }
-    
-    // Sjekk om agenten allerede er godkjent
-    if (agent.isApproved) {
-      console.log("Agent is already approved");
-      return;
-    }
-    
-    // Vi setter pending approval for å forhindre flere klikk
-    setPendingApproval(agent.id || agent.name);
-    
-    // Oppdater lokalt først for bedre responsitivitet
-    const updatedAgentData = localAgentData.map(localAgent => 
-      (localAgent.id === agent.id || localAgent.name === agent.name) 
-        ? { 
-            ...localAgent, 
-            pendingApproval: true,
-            approvalStatus: 'pending'
-          } 
-        : localAgent
-    );
-    
-    setLocalAgentData(updatedAgentData);
-    
-    // Deretter kall parent-funksjonen for å faktisk utføre godkjenningen
-    setTimeout(async () => {
-      try {
-        // Kall godkjenningsfunksjonen
-        openBatchApproval({
-          ...agent,
-          onApprovalComplete: async (success) => {
-            console.log("Approval completed:", success);
-            
-            try {
-              // Beregn total provisjon
-              const commissionDetails = calculateTotalCommission(agent);
-              const totalCommission = commissionDetails.total;
-              
-              // Finn eksisterende godkjenning for denne måneden
-              const currentMonth = format(new Date(), 'yyyy-MM');
-              const { data: existingApproval, error: findError } = await supabase
-                .from('monthly_commission_approvals')
-                .select('*')
-                .eq('agent_name', agent.name)
-                .eq('month_year', currentMonth)
-                .single();
-              
-              if (findError && findError.code !== 'PGRST116') { // PGRST116 er "no rows returned"
-                throw new Error('Kunne ikke sjekke eksisterende godkjenning');
-              }
-              
-              if (success) {
-                // Opprett eller oppdater godkjenning i databasen
-                const approvalData = {
-                  agent_name: agent.name,
-                  month_year: currentMonth,
-                  approved: true,
-                  approved_by: agent.managerName || 'System',
-                  approved_commission: totalCommission,
-                  approval_comment: 'Godkjent via batch-godkjenning',
-                  salary_model_id: agent.salaryModelId,
-                  approved_at: new Date().toISOString(),
-                  agent_company: agent.company || null,
-                  original_commission: agent.totalCommission || 0,
-                  agent_email: agent.email || null,
-                  calculated_commission: totalCommission,
-                  approval_metadata: {
-                    commission_details: commissionDetails.details,
-                    approval_timestamp: new Date().toISOString(),
-                    approval_method: 'batch'
-                  }
-                };
-                
-                if (existingApproval) {
-                  // Oppdater eksisterende godkjenning
-                  const { error: updateError } = await supabase
-                    .from('monthly_commission_approvals')
-                    .update(approvalData)
-                    .eq('id', existingApproval.id);
-                  
-                  if (updateError) {
-                    throw new Error(`Kunne ikke oppdatere godkjenning: ${updateError.message}`);
-                  }
-                } else {
-                  // Opprett ny godkjenning
-                  const { error: insertError } = await supabase
-                    .from('monthly_commission_approvals')
-                    .insert([approvalData]);
-                  
-                  if (insertError) {
-                    throw new Error(`Kunne ikke opprette godkjenning: ${insertError.message}`);
-                  }
-                }
-              }
-              
-              // Oppdater lokal status basert på resultatet
-              const updatedStatus = success ? 'approved' : 'failed';
-              const updatedAgentData = localAgentData.map(localAgent => 
-                (localAgent.id === agent.id || localAgent.name === agent.name) 
-                  ? { 
-                      ...localAgent, 
-                      isApproved: success,
-                      pendingApproval: false,
-                      approvalStatus: updatedStatus,
-                      lastApprovalAttempt: new Date().toISOString(),
-                      lastApprovalResult: success ? 'success' : 'failed'
-                    } 
-                  : localAgent
-              );
-              
-              // Oppdater lokalt først
-              setLocalAgentData(updatedAgentData);
-              
-              // Deretter sørg for at parent oppdateres
-              updateParent(updatedAgentData);
-              
-              // Fjern pending status etter en kort forsinkelse
-              setTimeout(() => {
-                setPendingApproval(null);
-              }, 2000);
-            } catch (error) {
-              console.error("Error updating approval status in database:", error);
-              
-              // Oppdater status ved feil
-              const errorAgentData = localAgentData.map(localAgent => 
-                (localAgent.id === agent.id || localAgent.name === agent.name) 
-                  ? { 
-                      ...localAgent, 
-                      pendingApproval: false,
-                      approvalStatus: 'error',
-                      lastApprovalAttempt: new Date().toISOString(),
-                      lastApprovalResult: 'error',
-                      lastError: error.message
-                    } 
-                  : localAgent
-              );
-              
-              setLocalAgentData(errorAgentData);
-              setPendingApproval(null);
-              
-              // Oppdater parent med feilstatus
-              updateParent(errorAgentData);
-            }
-          }
-        });
-      } catch (error) {
-        console.error("Error during approval process:", error);
-        
-        // Oppdater status ved feil
-        const errorAgentData = localAgentData.map(localAgent => 
-          (localAgent.id === agent.id || localAgent.name === agent.name) 
-            ? { 
-                ...localAgent, 
-                pendingApproval: false,
-                approvalStatus: 'error',
-                lastApprovalAttempt: new Date().toISOString(),
-                lastApprovalResult: 'error',
-                lastError: error.message
-              } 
-            : localAgent
-        );
-        
-        setLocalAgentData(errorAgentData);
-        setPendingApproval(null);
-        
-        // Oppdater parent med feilstatus
-        updateParent(errorAgentData);
+  const handleOpenBatchApprovalClick = useCallback((agent) => {
+    try {
+      console.log("Opening batch approval for agent:", agent);
+      
+      if (!agent) {
+        console.error("Agent data is undefined");
+        return;
       }
-    }, 0);
+      
+      // Sjekk og logg 5% trekk status
+      const monthsEmployed = agent.hireDate ? 
+        differenceInMonths(new Date(), new Date(agent.hireDate)) : null;
+      
+      console.log("Agent employment details:", {
+        name: agent.name,
+        hireDate: agent.hireDate,
+        monthsEmployed,
+        applyFivePercent: agent.applyFivePercent,
+        reason: monthsEmployed !== null ? 
+          (monthsEmployed < 9 ? "Under 9 måneder ansatt" : "Over 9 måneder ansatt") : 
+          "Ansettelsesdato mangler"
+      });
+      
+      // Logg full agentdata for debugging
+      console.log("Full agent data:", {
+        name: agent.name,
+        commission: agent.commission,
+        originalCommission: agent.originalCommission,
+        livCommission: agent.livCommission,
+        skadeCommission: agent.skadeCommission,
+        bonusAmount: agent.bonusAmount,
+        baseCommission: agent.baseCommission,
+        totalBeforeTrekk: agent.totalBeforeTrekk,
+        trekk: {
+          tjenestetorgetDeduction: agent.tjenestetorgetDeduction,
+          byttDeduction: agent.byttDeduction,
+          otherDeductions: agent.otherDeductions,
+          applyFivePercent: agent.applyFivePercent,
+          fivePercentDeduction: agent.applyFivePercent ? 
+            (agent.totalBeforeTrekk + (agent.bonusAmount || 0)) * 0.05 : 0
+        }
+      });
+      
+      // Beregn 5% trekket basert på totalprovisjon med bonus
+      const totalBeforeTrekk = agent.totalBeforeTrekk || 
+        (agent.livCommission || 0) + (agent.skadeCommission || 0);
+      const totalWithBonus = totalBeforeTrekk + (agent.bonusAmount || 0);
+      const fivePercentDeduction = agent.applyFivePercent ? totalWithBonus * 0.05 : 0;
+
+      console.log("5% trekk-beregning:", {
+        totalBeforeTrekk,
+        totalWithBonus,
+        applyFivePercent: agent.applyFivePercent,
+        fivePercentDeduction,
+        bonusAmount: agent.bonusAmount
+      });
+
+      const agentData = {
+        name: agent.name,
+        id: agent.id || agent.agentId,
+        agentId: agent.agentId || agent.id,
+        company: agent.agent_company || agent.company || managerData?.office,
+        
+        // Provisjonsdata
+        commission: agent.commission || agent.originalCommission || 0,
+        livCommission: agent.livCommission || 0,
+        skadeCommission: agent.skadeCommission || 0,
+        bonusAmount: agent.bonusAmount || 0,
+        baseCommission: agent.baseCommission || 0,
+        totalBeforeTrekk: totalBeforeTrekk,
+        totalWithBonus: totalWithBonus,
+        
+        // Premier
+        skadePremium: agent.skadePremium || 0,
+        livPremium: agent.livPremium || 0,
+        totalPremium: agent.totalPremium || 0,
+        
+        // Provisjonssatser
+        skadeCommissionRate: agent.skadeCommissionRate || 0,
+        livCommissionRate: agent.livCommissionRate || 0,
+        
+        // Trekk
+        tjenestetorgetDeduction: agent.tjenestetorgetDeduction || agent.tjenestetorgetTrekk || 0,
+        byttDeduction: agent.byttDeduction || agent.byttTrekk || 0,
+        otherDeductions: agent.otherDeductions || agent.andreTrekk || 0,
+        fivePercentDeduction: fivePercentDeduction,
+        
+        // Andre felter
+        baseSalary: agent.baseSalary || 0,
+        bonus: agent.bonus || 0,
+        applyFivePercent: agent.applyFivePercent !== undefined ? agent.applyFivePercent : false,
+        salaryModelId: agent.salaryModelId,
+        isModified: agent.isModified || false,
+        
+        // Ansettelsesdata
+        hireDate: agent.hireDate,
+        monthsEmployed: monthsEmployed,
+        
+        // Måned og år
+        selectedMonth: selectedMonth ? selectedMonth.split('-')[1] : '',
+        selectedYear: selectedMonth ? selectedMonth.split('-')[0] : ''
+      };
+      
+      console.log("Prepared agent data for approval:", agentData);
+      openBatchApproval(agentData);
+    } catch (error) {
+      console.error("Error in handleOpenBatchApprovalClick:", error);
+    }
+  }, [openBatchApproval, managerData]);
+
+  const renderApprovalStatus = useCallback((agent) => {
+    console.log(`Rendering approval status for ${agent.name}:`, {
+      isApproved: agent.isApproved,
+      manager_approved: agent.manager_approved,
+      admin_approved: agent.admin_approved,
+      approvalStatus: agent.approvalStatus
+    });
+
+    if (agent.isApproved) {
+      return (
+        <Chip
+          label="Godkjent"
+          color="success"
+          size="small"
+          icon={<CheckCircle />}
+        />
+      );
+    } else if (agent.manager_approved) {
+      return (
+        <Chip
+          label="Venter på admin"
+          color="warning"
+          size="small"
+          icon={<Warning />}
+        />
+      );
+    } else {
+      return (
+        <Chip
+          label="Ikke godkjent"
+          color="error"
+          size="small"
+          icon={<Warning />}
+        />
+      );
+    }
+  }, []);
+
+  const handleApproveCommission = async (agent) => {
+    try {
+      const isAdmin = managerData?.role === 'admin';
+      await handleApproval(
+        agent,
+        agent.commission,
+        "",
+        updateAgentPerformance,
+        isAdmin
+      );
+      
+      // Oppdater lokale data
+      const updatedAgents = localAgentData.map(a => {
+        if (a.name === agent.name) {
+          return {
+            ...a,
+            isApproved: isAdmin,
+            approvalStatus: isAdmin ? 'approved' : 'pending_admin'
+          };
+        }
+        return a;
+      });
+      setLocalAgentData(updatedAgents);
+      
+    } catch (error) {
+      console.error('Feil ved godkjenning:', error);
+      setSaveError(error.message);
+    }
+  };
+
+  const formatCurrency = (value) => {
+    if (value === undefined || value === null) return '0 kr';
+    return `${value.toLocaleString('nb-NO')} kr`;
   };
 
   const handleRetryApproval = (agent) => {
@@ -709,313 +776,121 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
     handleOpenBatchApprovalClick(agent);
   };
 
+  // Forenklede provisjonsdetaljer for visning i hovedtabellen
+  const renderCommissionAmount = (agent) => {
+    if (!agent) return null;
+    
+    // Formater provisjonsbeløpet pent
+    const commission = agent.commission || 0;
+    
+    // Vis både brutto- og nettobeløp hvis vi har 5% trekk
+    if (agent.applyFivePercent && agent.fivePercentTrekk > 0) {
+      const totalBeforeTrekk = agent.totalBeforeTrekk || 0;
+      const fivePercentTrekk = agent.fivePercentTrekk || 0;
+      
+      return (
+        <Box>
+          <Typography variant="body1" sx={{ fontWeight: 'bold' }}>
+            {commission.toLocaleString('nb-NO')} kr
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            Før 5% trekk: {totalBeforeTrekk.toLocaleString('nb-NO')} kr
+          </Typography>
+          <Typography variant="caption" color="warning.main" sx={{ display: 'block' }}>
+            5% trekk: {fivePercentTrekk.toLocaleString('nb-NO')} kr
+          </Typography>
+        </Box>
+      );
+    }
+    
+    return (
+      <Typography variant="body1">
+        {commission.toLocaleString('nb-NO')} kr
+      </Typography>
+    );
+  };
+
   return (
     <Box sx={{ p: 3 }}>
-      <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography variant="h6" fontWeight="bold">
-          Rådgivere - {sortedAgents().filter(a => !a.isApproved).length} venter på godkjenning
-        </Typography>
-        
+      <Box sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
         <TextField 
           placeholder="Søk etter rådgiver..."
+          variant="outlined"
           size="small"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
-                <Search fontSize="small" />
+                <Search />
               </InputAdornment>
             ),
           }}
-          sx={{ width: 250 }}
+          sx={{ flexGrow: 1 }}
         />
       </Box>
       
-      <Box sx={{ 
-        position: 'relative',
-        '&::after': {
-          content: '""',
-          position: 'absolute',
-          bottom: 0,
-          right: 0,
-          height: '100%',
-          width: '15px',
-          background: 'linear-gradient(to right, transparent, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.05) 100%)',
-          pointerEvents: 'none',
-          zIndex: 1,
-          display: { xs: 'block', md: 'none' },
-        },
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          bottom: 0,
-          height: '15px',
-          width: '100%',
-          background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.05) 100%)',
-          pointerEvents: 'none',
-          zIndex: 1,
-        }
-      }}>
-        <TableContainer component={Paper} sx={{ mt: 2, overflowX: 'auto' }}>
-          <Table sx={{ tableLayout: 'fixed', minWidth: 1800 }} stickyHeader>
+      <TableContainer component={Paper}>
+        <Table>
             <TableHead>
-              <TableRow sx={{ backgroundColor: alpha(theme.palette.primary.main, 0.05) }}>
-                <TableCell sx={{ 
-                  width: 40, 
-                  p: 1.5, 
-                  fontSize: '0.8rem', 
-                  fontWeight: 'bold', 
-                  whiteSpace: 'nowrap',
-                  position: 'sticky',
-                  left: 0,
-                  zIndex: 3,
-                  backgroundColor: alpha(theme.palette.primary.main, 0.05),
-                }}>#</TableCell>
-                <TableCell sx={{ 
-                  width: 180, 
-                  p: 1.5, 
-                  fontSize: '0.8rem', 
-                  fontWeight: 'bold', 
-                  whiteSpace: 'nowrap',
-                  backgroundColor: alpha(theme.palette.primary.main, 0.05),
-                  borderRight: '1px solid rgba(224, 224, 224, 1)'
-                }}>Navn</TableCell>
-                <TableCell sx={{ width: 150, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Lønnstrinn / Stilling</TableCell>
-                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Skadesalg</TableCell>
-                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Livsalg</TableCell>
-                <TableCell sx={{ width: 130, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Skadeprovisjon %</TableCell>
-                <TableCell sx={{ width: 130, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Livprovisjon %</TableCell>
-                <TableCell sx={{ width: 160, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Anbud Tjenestetorget</TableCell>
-                <TableCell sx={{ width: 120, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Anbud Bytt</TableCell>
-                <TableCell sx={{ width: 120, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Andre anbud</TableCell>
-                <TableCell sx={{ width: 130, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Total provisjon</TableCell>
-                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Fastlønn</TableCell>
-                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Bonus</TableCell>
-                <TableCell sx={{ width: 110, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Egenmelding</TableCell>
-                <TableCell sx={{ width: 90, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>5% trekk</TableCell>
-                <TableCell sx={{ width: 100, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Handlinger</TableCell>
-                <TableCell sx={{ width: 120, p: 1.5, fontSize: '0.8rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Godkjenningsstatus</TableCell>
+            <TableRow>
+              <TableCell>Navn</TableCell>
+              <TableCell>Lønnstrinn</TableCell>
+              <TableCell>Skadesalg</TableCell>
+              <TableCell>Livsalg</TableCell>
+              <TableCell>Trekk (anbud)</TableCell>
+              <TableCell>5% trekk</TableCell>
+              <TableCell>Provisjon</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Handlinger</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {sortedAgents().length > 0 ? (
-                sortedAgents().map((agent, index) => {
-                  const commissionDetails = calculateTotalCommission(agent);
-                  return (
-                    <TableRow key={agent.agent_id || index} hover>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell sx={{ 
-                        whiteSpace: 'nowrap',
-                        position: 'sticky',
-                        left: 0,
-                        zIndex: 1,
-                        backgroundColor: 'background.paper',
-                        borderRight: '1px solid rgba(224, 224, 224, 1)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        maxWidth: 180
-                      }}>
-                        <Tooltip title={agent.name}>
-                          <span>{agent.name}</span>
-                        </Tooltip>
-                      </TableCell>
+            {sortedAgents.length > 0 ? (
+              sortedAgents.map((agent) => (
+                <TableRow key={agent.id}>
+                  <TableCell>{agent.name}</TableCell>
+                  <TableCell>{agent.salaryModelName}</TableCell>
+                  <TableCell>{agent.skadePremium.toLocaleString('no-NO')} kr</TableCell>
+                  <TableCell>{agent.livPremium.toLocaleString('no-NO')} kr</TableCell>
+                  <TableCell>
+                    {(parseFloat(agent.tjenestetorgetDeduction || 0) + 
+                      parseFloat(agent.byttDeduction || 0) + 
+                      parseFloat(agent.otherDeductions || 0)).toLocaleString('no-NO')} kr
+                  </TableCell>
+                  <TableCell>
+                    {agent.applyFivePercent ? 
+                      (agent.fivePercentTrekk || 0).toLocaleString('no-NO') + ' kr' : 
+                      'Ikke aktiv'}
+                  </TableCell>
+                  <TableCell>{renderCommissionAmount(agent)}</TableCell>
+                  <TableCell>{renderApprovalStatus(agent)}</TableCell>
                       <TableCell>
-                        <Box>
-                          <Chip 
-                            label={agent.salaryModelName} 
-                            size="small" 
-                            variant="outlined"
-                            color="primary"
-                          />
-                          <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                            {agent.position || "Rådgiver"}
-                          </Typography>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right">
-                        {(agent.skadePremium || 0).toLocaleString('nb-NO')} kr
-                      </TableCell>
-                      <TableCell align="right">
-                        {(agent.livPremium || 0).toLocaleString('nb-NO')} kr
-                      </TableCell>
-                      <TableCell align="right">
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                          {agent.skadeCommissionRate || "-"}%
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right">
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                          {agent.livCommissionRate || "-"}%
-                        </Box>
-                      </TableCell>
-                      <TableCell align="right">
-                        {(agent.tjenestetorgetDeduction || 0).toLocaleString('nb-NO')} kr
-                      </TableCell>
-                      <TableCell align="right">
-                        {(agent.byttDeduction || 0).toLocaleString('nb-NO')} kr
-                      </TableCell>
-                      <TableCell align="right">
-                        {(agent.otherDeductions || 0).toLocaleString('nb-NO')} kr
-                      </TableCell>
-                      <TableCell sx={{ 
-                        fontWeight: 'bold', 
-                        color: theme.palette.success.main,
-                        whiteSpace: 'nowrap'
-                      }}>
-                        <Tooltip title={
-                          agent.applyFivePercent ? 
-                          <React.Fragment>
-                            <Typography variant="subtitle2">Beregning av provisjon:</Typography>
-                            <Typography variant="body2">
-                              Skade: {commissionDetails.details.skadeCommission.toLocaleString('nb-NO')} kr<br />
-                              Liv: {commissionDetails.details.livCommission.toLocaleString('nb-NO')} kr<br />
-                              <b>Sum før trekk: {commissionDetails.details.totalBeforeDeductions.toLocaleString('nb-NO')} kr</b><br />
-                              <Divider sx={{ my: 1 }} />
-                              Tjenestetorget: -{commissionDetails.details.tjenestetorgetDeduction.toLocaleString('nb-NO')} kr<br />
-                              Bytt: -{commissionDetails.details.byttDeduction.toLocaleString('nb-NO')} kr<br />
-                              Andre trekk: -{commissionDetails.details.otherDeductions.toLocaleString('nb-NO')} kr<br />
-                              5% trekk: -{commissionDetails.details.fivePercentDeduction.toLocaleString('nb-NO')} kr<br />
-                              <Divider sx={{ my: 1 }} />
-                              <b>Total provisjon: {commissionDetails.total.toLocaleString('nb-NO')} kr</b>
-                            </Typography>
-                          </React.Fragment>
-                          : ""
-                        } arrow placement="left">
-                          <span>{commissionDetails.total.toLocaleString('nb-NO')} kr</span>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell align="right">
-                        {(agent.baseSalary || 0).toLocaleString('nb-NO')} kr
-                      </TableCell>
-                      <TableCell align="right">
-                        {(agent.bonus || 0).toLocaleString('nb-NO')} kr
-                      </TableCell>
-                      <TableCell align="center">
-                        {agent.sickLeave || "-"}
-                      </TableCell>
-                      <TableCell align="center">
-                        <Tooltip title="Klikk for å endre">
-                          <Chip
-                            label={agent.applyFivePercent ? 'Ja' : 'Nei'}
-                            color={agent.applyFivePercent ? 'primary' : 'default'}
-                            size="small"
-                            onClick={() => handleToggleFivePercent(agent, agent.applyFivePercent)}
-                            sx={{ cursor: 'pointer' }}
-                          />
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell align="center">
-                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', justifyContent: 'center' }}>
-                          {((agent.totalCommission > 0 || agent.commission > 0) && 
-                            !agent.isApproved && 
-                            pendingApproval !== (agent.id || agent.name)) && (
-                            <Button 
-                              variant="contained" 
-                              color="primary" 
-                              size="small"
-                              onClick={() => handleOpenBatchApprovalClick(agent)}
-                              disabled={pendingApproval !== null}
-                              startIcon={<CheckCircle fontSize="small" />}
-                            >
-                              Godkjenn
-                            </Button>
-                          )}
-                          <IconButton 
-                            size="small"
+                    {!agent.admin_approved && (
+                          <Button 
+                            variant="contained" 
                             color="primary" 
-                            onClick={() => handleOpenEditDialog(agent)}
-                            disabled={pendingApproval === (agent.id || agent.name)}
+                            size="small"
+                        onClick={() => openBatchApproval(agent)}
                           >
-                            <Edit fontSize="small" />
-                          </IconButton>
-                        </Box>
-                      </TableCell>
-                      <TableCell align="center">
-                        {agent.isApproved ? (
-                          <Chip 
-                            label="Godkjent" 
-                            color="success" 
-                            size="small" 
-                            icon={<CheckCircle fontSize="small" />}
-                            sx={{ fontWeight: 'bold' }}
-                          />
-                        ) : pendingApproval === (agent.id || agent.name) ? (
-                          <Chip 
-                            label="Venter på bekreftelse..." 
-                            color="warning" 
-                            size="small"
-                            variant="outlined"
-                            sx={{ fontWeight: 'medium' }}
-                          />
-                        ) : agent.approvalStatus === 'failed' ? (
-                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                            <Tooltip title={`Siste forsøk: ${new Date(agent.lastApprovalAttempt).toLocaleString('nb-NO')}`}>
-                              <Chip 
-                                label="Godkjenning feilet" 
-                                color="error" 
-                                size="small"
-                                variant="outlined"
-                                sx={{ border: '1px dashed', fontWeight: 'medium' }}
-                              />
-                            </Tooltip>
-                            <Tooltip title="Prøv igjen">
-                              <IconButton
-                                size="small"
-                                color="error"
-                                onClick={() => handleRetryApproval(agent)}
-                                disabled={pendingApproval !== null}
-                              >
-                                <Refresh fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </Box>
-                        ) : agent.approvalStatus === 'error' ? (
-                          <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                            <Tooltip title={agent.lastError || 'En feil oppstod under godkjenning'}>
-                              <Chip 
-                                label="Feil under godkjenning" 
-                                color="error" 
-                                size="small"
-                                variant="outlined"
-                                sx={{ border: '1px dashed', fontWeight: 'medium' }}
-                              />
-                            </Tooltip>
-                            <Tooltip title="Prøv igjen">
-                              <IconButton
-                                size="small"
-                                color="error"
-                                onClick={() => handleRetryApproval(agent)}
-                                disabled={pendingApproval !== null}
-                              >
-                                <Refresh fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                          </Box>
-                        ) : (
-                          <Chip 
-                            label="Ikke godkjent" 
-                            color="default" 
-                            size="small"
-                            variant="outlined"
-                            sx={{ border: '1px dashed', fontWeight: 'medium' }}
-                          />
-                        )}
+                        Godkjenn provisjon
+                          </Button>
+                    )}
                       </TableCell>
                     </TableRow>
-                  );
-                })
+              ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={17} align="center">
+                <TableCell colSpan={10} align="center">
+                  <Typography variant="body1" color="textSecondary">
                     Ingen agenter funnet for dette kontoret
+                  </Typography>
                   </TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
         </TableContainer>
-      </Box>
       
       <Dialog open={editDialogOpen} onClose={handleCloseEditDialog} maxWidth="md" fullWidth>
         <DialogTitle>
@@ -1152,13 +1027,25 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
                   }
                   label={`Anvend 5% trekk (${editValues.applyFivePercent ? 'Ja' : 'Nei'})`}
                 />
-                {editingAgent && editValues.applyFivePercent && (
-                  <Alert severity="info" sx={{ mt: 1, fontSize: '0.85rem' }}>
-                    5% trekket utgjør ca. {(
-                      (editingAgent.skadePremium * (editingAgent.skadeCommissionRate || 0) / 100 + 
-                       editingAgent.livPremium * (editingAgent.livCommissionRate || 0) / 100) * 0.05
-                    ).toLocaleString('nb-NO')} kr av provisjonen.
-                  </Alert>
+                {editingAgent && (
+                  <>
+                    {editingAgent.monthsEmployed !== null && (
+                      <Typography variant="caption" display="block" sx={{ mt: 0.5, mb: 1 }}>
+                        {editingAgent.name} har vært ansatt i {editingAgent.monthsEmployed} måneder. 
+                        {editingAgent.isNewHire ? 
+                          " 5% trekk bør være på for ansatte under 9 måneder." : 
+                          " 5% trekk bør være av for ansatte over 9 måneder."}
+                      </Typography>
+                    )}
+                    {editValues.applyFivePercent && (
+                      <Alert severity="info" sx={{ mt: 1, fontSize: '0.85rem' }}>
+                        5% trekket utgjør ca. {(
+                          (editingAgent.skadePremium * (editingAgent.skadeCommissionRate || 0) / 100 + 
+                            editingAgent.livPremium * (editingAgent.livCommissionRate || 0) / 100) * 0.05
+                        ).toLocaleString('nb-NO')} kr av provisjonen.
+                      </Alert>
+                    )}
+                  </>
                 )}
               </Box>
             </Box>
@@ -1172,7 +1059,7 @@ const AgentTab = ({ agentPerformance, updateAgentPerformance, CHART_COLORS, sala
             variant="contained" 
             color="primary" 
             startIcon={saveLoading ? null : <Save />}
-            onClick={handleSaveChanges} 
+            onClick={handleSubmitEdit} 
             disabled={saveLoading}
           >
             {saveLoading ? <CircularProgress size={24} /> : 'Lagre endringer'}

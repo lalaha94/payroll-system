@@ -118,21 +118,27 @@ function AgentDashboard() {
         
         if (employeeData) {
           // Now fetch the salary model separately
+          const defaultSalaryModelId = '1';
+          const actualSalaryModelId = employeeData.salary_model_id || defaultSalaryModelId;
+          
           const { data: salaryModelData, error: salaryModelError } = await supabase
             .from('salary_models')
             .select('*')
-            .eq('id', employeeData.salary_model_id)
+            .eq('id', actualSalaryModelId)
             .single();
             
           console.log("AgentDashboard - Salary model data:", salaryModelData);
           console.log("AgentDashboard - Salary model error:", salaryModelError);
           
           if (salaryModelError && salaryModelError.code !== 'PGRST116') {
-            console.warn("Could not fetch salary model:", salaryModelError);
-            // Continue without salary model
+            console.warn("Kunne ikke hente lønnstrinn:", salaryModelError);
+            // Fortsett uten lønnstrinn
           }
           
-          setAgentData(employeeData);
+          setAgentData({
+            ...employeeData,
+            salary_model_id: actualSalaryModelId
+          });
           setSalaryModel(salaryModelData || null);
           
           // Fetch all sales data for this agent
@@ -147,13 +153,19 @@ function AgentDashboard() {
             
           if (!emailError && emailEmployeeData) {
             // Fetch the salary model separately
+            const defaultSalaryModelId = '1';
+            const actualSalaryModelId = emailEmployeeData.salary_model_id || defaultSalaryModelId;
+            
             const { data: salaryModelData, error: salaryModelError } = await supabase
               .from('salary_models')
               .select('*')
-              .eq('id', emailEmployeeData.salary_model_id)
+              .eq('id', actualSalaryModelId)
               .single();
               
-            setAgentData(emailEmployeeData);
+            setAgentData({
+              ...emailEmployeeData,
+              salary_model_id: actualSalaryModelId
+            });
             setSalaryModel(salaryModelData || null);
             await fetchAgentSalesData(emailEmployeeData.name);
           } else {

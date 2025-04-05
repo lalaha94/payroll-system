@@ -12,7 +12,8 @@ import { OfficeManagerDashboard } from './Manager';
 import './index.css';
 
 // Import SalesDataDashboard directly - handle it properly to avoid circular imports
-import SalesDataDashboard from './Admin/SalesDataDashboard';
+import AdminDashboard from './admin/SalesDataDashboard';
+import SalesDataDashboard from './admin/SalesDataDashboard'; // Ensure SalesDataDashboard is properly imported
 import AgentDashboard from './Agent/components/AgentDashboard'; // Import the AgentDashboard component
 import ProtectedRoute from './routes/ProtectedRoute'; // Import the external ProtectedRoute component
 import ErrorBoundary from './components/common/ErrorBoundary'; // Import the external ErrorBoundary
@@ -27,16 +28,33 @@ const App = () => {
     // Check if Supabase is properly configured
     const checkSupabase = async () => {
       try {
-        const { data, error } = await supabase.from('salary_models').select('id').limit(1);
+        // Først sjekk autentisering
+        const { data: { session }, error: authError } = await supabase.auth.getSession();
+        
+        if (authError) {
+          throw new Error(`Autentiseringsfeil: ${authError.message}`);
+        }
+
+        if (!session) {
+          console.log('Ingen aktiv sesjon - redirecter til login');
+          setIsLoading(false);
+          return;
+        }
+
+        // Deretter test databasetilgang
+        const { data, error } = await supabase
+          .from('salary_models')
+          .select('id')
+          .limit(1);
         
         if (error) {
-          throw new Error(`Supabase query failed: ${error.message}`);
+          throw new Error(`Database-feil: ${error.message}`);
         }
         
-        console.log('Supabase connection is working');
+        console.log('Supabase-tilkobling fungerer');
         setIsLoading(false);
       } catch (err) {
-        console.error("Supabase connection error:", err);
+        console.error("Supabase-tilkoblingsfeil:", err);
         setError(err.message);
         setIsLoading(false);
       }

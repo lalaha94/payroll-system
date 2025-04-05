@@ -202,11 +202,13 @@ function MonthlyApprovalsTab({
         (agent.skadePremium > 0 || agent.livPremium > 0)
       );
       
+      // Hvis agenten er godkjent, vis kun når showApproved er true
       if (isActuallyApproved) {
         return showApproved;
       }
       
-      return true;
+      // Vis alle ikke-godkjente agenter som har provisjon
+      return hasCommission;
     });
     
     const sortedAgents = [...filteredAgents].sort((a, b) => {

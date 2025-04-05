@@ -9,6 +9,7 @@ import RevocationDialog from './components/RevocationDialog';
 import { useManagerData } from './hooks/useManagerData';
 import { useApprovalFunctions } from './hooks/useApprovalFunctions';
 import { supabase } from '../supabaseClient';
+import { checkMonthlyApprovalExists } from '../services/commissionService';
 
 function OfficeManagerDashboard() {
   const {
@@ -52,7 +53,10 @@ function OfficeManagerDashboard() {
     openBatchApproval,
     approvalSuccess,
     setApprovalSuccess,
-  } = useApprovalFunctions(selectedOffice, selectedMonth);
+    approvalError: hookApprovalError,
+    setApprovalError: setHookApprovalError,
+    handleApproval
+  } = useApprovalFunctions(selectedOffice, selectedMonth, managerData);
 
   const selectedAgent = currentApprovalData;
 
@@ -74,59 +78,139 @@ function OfficeManagerDashboard() {
   };
 
   const handleBatchApprove = useCallback(async () => {
+    if (!selectedAgent || !selectedMonth || !managerData) {
+      setHookApprovalError("Mangler data for godkjenning");
+      return;
+    }
+    
+    if (!batchAmount || parseFloat(batchAmount) <= 0) {
+      setHookApprovalError("Ugyldig godkjenningsbeløp");
+      return;
+    }
+    
+    setBatchApprovalLoading(true);
+    setHookApprovalError(null);
+    
     try {
-      setBatchApprovalLoading(true);
-      setApprovalError(null);
-      
-      // Validere inndata
-      if (!selectedAgent) {
-        throw new Error("Agent mangler. Velg en agent først.");
-      }
-      
-      if (!selectedAgent.name) {
-        throw new Error("Agent navn mangler i utvalgte data. Velg agent på nytt.");
-      }
-      
-      if (!selectedMonth) {
-        throw new Error("Måned mangler. Velg en måned først.");
-      }
-      
-      if (!managerData) {
-        throw new Error("Lederdata mangler. Prøv å logge inn på nytt.");
-      }
-      
-      // Bruk enten e-post eller navn som godkjenner-ID
-      const approverIdentifier = managerData.email || managerData.name;
-      if (!approverIdentifier) {
-        throw new Error("Lederen mangler identifikasjon (e-post/navn). Kontakt administrator.");
-      }
+      console.log(`Godkjenner provisjon for ${selectedAgent.name}:`, {
+        beløp: parseFloat(batchAmount),
+        måned: selectedMonth,
+        kommentar: batchComment,
+        agentData: selectedAgent
+      });
 
-      const approvedAmount = parseFloat(batchAmount);
-      if (isNaN(approvedAmount) || approvedAmount <= 0) {
-        throw new Error("Ugyldig provisjonsbeløp.");
-      }
-
-      const { approveMonthlySales } = await import('../services/commissionService');
+      // Sjekk om godkjenning allerede eksisterer
+      const { exists, data, error: checkError } = await checkMonthlyApprovalExists(selectedAgent.name, selectedMonth);
       
-      await approveMonthlySales(
-        selectedAgent.name,
-        selectedMonth,
-        approverIdentifier,
-        approvedAmount,
-        batchComment || ""
+      if (checkError) {
+        console.error("Feil ved sjekk av eksisterende godkjenning:", checkError);
+      }
+      
+      if (exists) {
+        console.log("Godkjenning eksisterer allerede:", data);
+      }
+      
+      // Beregn provisjonsdetaljer for å kunne lagre dem korrekt
+      let details = {};
+      
+      // Bruk forhåndsberegnede verdier hvis tilgjengelig
+      if (selectedAgent && selectedAgent.livCommission !== undefined && selectedAgent.skadeCommission !== undefined) {
+        details = {
+          skadeCommission: selectedAgent.skadeCommission || 0,
+          livCommission: selectedAgent.livCommission || 0,
+          bonusAmount: selectedAgent.bonusAmount || 0,
+          totalBeforeDeductions: selectedAgent.totalBeforeTrekk || 0,
+          tjenestetorgetDeduction: selectedAgent.tjenestetorgetDeduction || 0,
+          byttDeduction: selectedAgent.byttDeduction || 0,
+          otherDeductions: selectedAgent.otherDeductions || 0
+        };
+      } else if (selectedAgent) {
+        // Beregn på nytt hvis nødvendig
+        const skadeCommission = (selectedAgent.skadePremium || 0) * ((selectedAgent.skadeCommissionRate || 0) / 100);
+        const livCommission = (selectedAgent.livPremium || 0) * ((selectedAgent.livCommissionRate || 0) / 100);
+        const totalBeforeDeductions = skadeCommission + livCommission;
+        
+        details = {
+          skadeCommission,
+          livCommission,
+          bonusAmount: 0,
+          totalBeforeDeductions,
+          tjenestetorgetDeduction: selectedAgent.tjenestetorgetDeduction || 0,
+          byttDeduction: selectedAgent.byttDeduction || 0,
+          otherDeductions: selectedAgent.otherDeductions || 0
+        };
+      }
+      
+      // Legg ved mer detaljerte provisjonsdata for godkjenningen
+      const approvalMetadata = {
+        originalCommission: selectedAgent.commission || selectedAgent.originalCommission || 0,
+        adjustedCommission: parseFloat(batchAmount),
+        livCommission: details.livCommission || 0,
+        skadeCommission: details.skadeCommission || 0,
+        bonusAmount: details.bonusAmount || 0,
+        totalBeforeTrekk: details.totalBeforeDeductions || 0,
+        tjenestetorgetDeduction: details.tjenestetorgetDeduction || 0,
+        byttDeduction: details.byttDeduction || 0,
+        otherDeductions: details.otherDeductions || 0,
+        hireDate: selectedAgent.hireDate,
+        monthsEmployed: selectedAgent.monthsEmployed,
+        applyFivePercent: selectedAgent.applyFivePercent
+      };
+      
+      console.log("Godkjenningsdata:", approvalMetadata);
+      
+      const isAdmin = managerData.role === 'admin';
+      
+      // Utfør godkjenningen med alle detaljene
+      await handleApproval(
+        selectedAgent,
+        parseFloat(batchAmount),
+        batchComment || "",
+        (updatedAgents) => {
+          setAgentPerformance(updatedAgents);
+          processMonthlyData();
+        },
+        isAdmin,
+        approvalMetadata
       );
-
-      setApprovalSuccess(`Provisjonen for ${selectedAgent.name} er godkjent!`);
-      closeBatchApproval();
+      
+      // Hent oppdaterte godkjenninger og oppdater UI
       await fetchMonthlyApprovals();
-      processMonthlyData();
-    } catch (err) {
-      console.error("Error in handleBatchApprove:", err);
-      setApprovalError(`Feil ved godkjenning: ${err.message}`);
+      
+      // Forsikre oss om at dataene oppdateres
+      setTimeout(() => {
+        processMonthlyData();
+        syncAgentsWithApprovals(agentPerformance, monthlyApprovals);
+      }, 500);
+      
+      setApprovalSuccess(`Provisjon for ${selectedAgent.name} ble godkjent.`);
+      setApprovalDialogOpen(false);
+      setBatchAmount('');
+      setBatchComment('');
+      setCurrentApprovalData(null);
+    } catch (error) {
+      console.error("Godkjenningsfeil:", error);
+      setHookApprovalError(`Feil ved godkjenning: ${error.message}`);
     } finally {
       setBatchApprovalLoading(false);
     }
-  }, [selectedAgent, selectedMonth, batchAmount, batchComment, managerData, closeBatchApproval, fetchMonthlyApprovals, processMonthlyData]);
+  }, [
+    selectedAgent, 
+    selectedMonth, 
+    managerData, 
+    batchAmount, 
+    batchComment, 
+    handleApproval, 
+    fetchMonthlyApprovals, 
+    processMonthlyData, 
+    setAgentPerformance, 
+    setApprovalDialogOpen, 
+    setApprovalSuccess, 
+    setCurrentApprovalData,
+    syncAgentsWithApprovals,
+    agentPerformance,
+    monthlyApprovals
+  ]);
 
   const openRevocationDialog = (agent) => {
     setCurrentApprovalData(agent);
@@ -263,11 +347,11 @@ function OfficeManagerDashboard() {
         setBatchComment={setBatchComment}
         handleCommissionAdjustment={handleCommissionAdjustment}
         handleBatchApprove={handleBatchApprove}
-        approvalError={approvalError}
+        approvalError={hookApprovalError}
         batchApprovalLoading={batchApprovalLoading}
         managerData={managerData}
         setSuccess={setApprovalSuccess}
-        setError={setApprovalError}
+        setError={setHookApprovalError}
         fetchApprovals={fetchMonthlyApprovals}
       />
 
@@ -310,12 +394,12 @@ function OfficeManagerDashboard() {
             processMonthlyData();
           } catch (err) {
             console.error("Error revoking approval:", err);
-            setApprovalError(`Feil ved tilbakekalling: ${err.message}`);
+            setHookApprovalError(`Feil ved tilbakekalling: ${err.message}`);
           } finally {
             setRevocationLoading(false);
           }
         }}
-        approvalError={approvalError}
+        approvalError={hookApprovalError}
         revocationLoading={revocationLoading}
       />
     </Box>

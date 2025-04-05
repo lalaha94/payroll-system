@@ -46,35 +46,143 @@ const ApprovalDialog = ({
   const calculateTotalProvision = (agent) => {
     if (!agent) return { total: 0, details: {} };
 
-    const skadeCommission = (agent.skadePremium || 0) * ((agent.skadeCommissionRate || 0) / 100);
-    const livCommission = (agent.livPremium || 0) * ((agent.livCommissionRate || 0) / 100);
-    const totalBeforeDeductions = skadeCommission + livCommission;
+    console.log("Beregner provisjon for agent:", agent.name, {
+      id: agent.id,
+      applyFivePercent: agent.applyFivePercent,
+      monthsEmployed: agent.monthsEmployed,
+      hireDate: agent.hireDate,
+      fivePercentDeduction: agent.fivePercentDeduction
+    });
 
-    const fivePercentDeduction = agent.applyFivePercent ? totalBeforeDeductions * 0.05 : 0;
-    const deductions =
-      fivePercentDeduction +
-      (agent.tjenestetorgetDeduction || 0) +
-      (agent.byttDeduction || 0) +
-      (agent.otherDeductions || 0);
-    const fixedSalary = agent.baseSalary || 0;
-    const bonus = agent.bonus || 0;
+    // Bruk de forhåndsberegnede verdiene hvis de finnes
+    if (agent.livCommission !== undefined && 
+        agent.skadeCommission !== undefined && 
+        agent.totalBeforeTrekk !== undefined) {
+      
+      console.log("Bruker forhåndsberegnede provisjonsverdier:", {
+        livCommission: agent.livCommission,
+        skadeCommission: agent.skadeCommission,
+        bonusAmount: agent.bonusAmount,
+        totalBeforeTrekk: agent.totalBeforeTrekk,
+        applyFivePercent: agent.applyFivePercent,
+        monthsEmployed: agent.monthsEmployed
+      });
+      
+      // Bruk forhåndsberegnede verdier
+      const skadeCommission = agent.skadeCommission || 0;
+      const livCommission = agent.livCommission || 0;
+      const bonusAmount = agent.bonusAmount || 0;
+      const totalBeforeDeductions = agent.totalBeforeTrekk || (skadeCommission + livCommission);
+      const totalWithBonus = totalBeforeDeductions + bonusAmount;
+      
+      // Beregn 5% trekket basert på det totale beløpet med bonus hvis flagget er satt
+      const applyFivePercent = agent.applyFivePercent !== undefined ? agent.applyFivePercent : false;
+      console.log("5% trekk status:", applyFivePercent, "for agent:", agent.name);
 
-    const total = totalBeforeDeductions - deductions + fixedSalary + bonus;
+      const fivePercentDeduction = applyFivePercent ? totalWithBonus * 0.05 : 0;
+      
+      const tjenestetorgetDeduction = agent.tjenestetorgetDeduction || 0;
+      const byttDeduction = agent.byttDeduction || 0;
+      const otherDeductions = agent.otherDeductions || 0;
+      const fixedSalary = agent.baseSalary || 0;
+      const bonus = agent.bonus || 0;
+      
+      // Samlet fradrag
+      const deductions = fivePercentDeduction + tjenestetorgetDeduction + byttDeduction + otherDeductions;
+      
+      // Total provisjon
+      const total = totalWithBonus - deductions;
+      
+      console.log("Beregnet provisjon:", {
+        skadeCommission,
+        livCommission,
+        bonusAmount,
+        totalBeforeDeductions,
+        totalWithBonus,
+        applyFivePercent: agent.applyFivePercent,
+        fivePercentDeduction,
+        totalDeductions: deductions,
+        finalTotal: total
+      });
+      
+      return {
+        total,
+        details: {
+          skadeCommission,
+          livCommission,
+          bonusAmount,
+          totalBeforeDeductions,
+          totalWithBonus,
+          fivePercentDeduction,
+          tjenestetorgetDeduction,
+          byttDeduction,
+          otherDeductions,
+          fixedSalary,
+          bonus,
+        },
+      };
+    } else {
+      console.log("Beregner provisjon på nytt fra satser:", {
+        skadePremium: agent.skadePremium,
+        livPremium: agent.livPremium,
+        skadeCommissionRate: agent.skadeCommissionRate,
+        livCommissionRate: agent.livCommissionRate,
+        applyFivePercent: agent.applyFivePercent,
+        monthsEmployed: agent.monthsEmployed,
+        bonus: agent.bonus
+      });
+      
+      // Beregn fra grunnen av
+      const skadeCommission = (agent.skadePremium || 0) * ((agent.skadeCommissionRate || 0) / 100);
+      const livCommission = (agent.livPremium || 0) * ((agent.livCommissionRate || 0) / 100);
+      const totalBeforeDeductions = skadeCommission + livCommission;
+      const bonus = agent.bonus || 0;
+      const totalWithBonus = totalBeforeDeductions + bonus;
 
-    return {
-      total,
-      details: {
+      // 5% trekk basert på totalBeløp med bonus
+      const applyFivePercent = agent.applyFivePercent !== undefined ? agent.applyFivePercent : false;
+      console.log("5% trekk status:", applyFivePercent, "for agent:", agent.name);
+
+      const fivePercentDeduction = applyFivePercent ? totalWithBonus * 0.05 : 0;
+      const tjenestetorgetDeduction = agent.tjenestetorgetDeduction || 0;
+      const byttDeduction = agent.byttDeduction || 0;
+      const otherDeductions = agent.otherDeductions || 0;
+      
+      // Samlet fradrag
+      const deductions = fivePercentDeduction + tjenestetorgetDeduction + byttDeduction + otherDeductions;
+      
+      const fixedSalary = agent.baseSalary || 0;
+      const bonusAmount = bonus;
+
+      const total = totalWithBonus - deductions + fixedSalary;
+      
+      console.log("Beregnet provisjon:", {
         skadeCommission,
         livCommission,
         totalBeforeDeductions,
+        totalWithBonus,
+        applyFivePercent: agent.applyFivePercent,
         fivePercentDeduction,
-        tjenestetorgetDeduction: agent.tjenestetorgetDeduction || 0,
-        byttDeduction: agent.byttDeduction || 0,
-        otherDeductions: agent.otherDeductions || 0,
-        fixedSalary,
-        bonus,
-      },
-    };
+        totalDeductions: deductions,
+        finalTotal: total
+      });
+
+      return {
+        total,
+        details: {
+          skadeCommission,
+          livCommission,
+          totalBeforeDeductions,
+          totalWithBonus,
+          fivePercentDeduction,
+          tjenestetorgetDeduction,
+          byttDeduction,
+          otherDeductions,
+          fixedSalary,
+          bonusAmount,
+        },
+      };
+    }
   };
 
   // Når dialogen åpnes, initialiser batchAmount til den beregnede totalen
@@ -165,11 +273,8 @@ const ApprovalDialog = ({
           </Grid>
 
           <Grid item xs={12}>
-            <Divider sx={{ my: 1 }} />
-            <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 2 }}>
-              Beregningsdetaljer
-            </Typography>
-            <Box sx={{ pl: 2, py: 1 }}>
+            <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Beregningsdetaljer</Typography>
+            <Box sx={{ px: 2, py: 1, bgcolor: theme.palette.grey[50], borderRadius: 1 }}>
               <Grid container spacing={1}>
                 <Grid item xs={6}>
                   <Typography variant="body2">Skadeprovisjon:</Typography>
@@ -179,6 +284,7 @@ const ApprovalDialog = ({
                     {details.skadeCommission.toLocaleString('nb-NO')} kr
                   </Typography>
                 </Grid>
+
                 <Grid item xs={6}>
                   <Typography variant="body2">Livprovisjon:</Typography>
                 </Grid>
@@ -187,76 +293,95 @@ const ApprovalDialog = ({
                     {details.livCommission.toLocaleString('nb-NO')} kr
                   </Typography>
                 </Grid>
-                <Grid item xs={12}>
-                  <Divider sx={{ my: 1 }} />
+
+                <Grid item xs={6}>
+                  <Typography variant="body2" fontWeight="bold">Sum provisjon:</Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2">Sum før trekk:</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" align="right">
+                  <Typography variant="body2" fontWeight="bold" align="right">
                     {details.totalBeforeDeductions.toLocaleString('nb-NO')} kr
                   </Typography>
                 </Grid>
-                {selectedAgent.applyFivePercent && (
+
+                {details.bonusAmount > 0 && (
                   <>
                     <Grid item xs={6}>
-                      <Typography variant="body2">5% trekk:</Typography>
+                      <Typography variant="body2" color="success.main">Bonus:</Typography>
                     </Grid>
                     <Grid item xs={6}>
-                      <Typography variant="body2" align="right">
+                      <Typography variant="body2" color="success.main" align="right">
+                        +{details.bonusAmount.toLocaleString('nb-NO')} kr
+                      </Typography>
+                    </Grid>
+
+                    <Grid item xs={6}>
+                      <Typography variant="body2" fontWeight="bold">Sum med bonus:</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" fontWeight="bold" align="right">
+                        {details.totalWithBonus.toLocaleString('nb-NO')} kr
+                      </Typography>
+                    </Grid>
+                  </>
+                )}
+
+                {details.fivePercentDeduction > 0 && (
+                  <>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="error">5% trekk (nyansatt):</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="error" align="right">
                         -{details.fivePercentDeduction.toLocaleString('nb-NO')} kr
                       </Typography>
                     </Grid>
                   </>
                 )}
+
                 <Grid item xs={6}>
-                  <Typography variant="body2">Tjenestetorget trekk:</Typography>
+                  <Typography variant="body2" color="error">Tjenestetorget trekk:</Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" align="right">
+                  <Typography variant="body2" color="error" align="right">
                     -{details.tjenestetorgetDeduction.toLocaleString('nb-NO')} kr
                   </Typography>
                 </Grid>
+
                 <Grid item xs={6}>
-                  <Typography variant="body2">Bytt trekk:</Typography>
+                  <Typography variant="body2" color="error">Bytt trekk:</Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" align="right">
+                  <Typography variant="body2" color="error" align="right">
                     -{details.byttDeduction.toLocaleString('nb-NO')} kr
                   </Typography>
                 </Grid>
+
                 <Grid item xs={6}>
-                  <Typography variant="body2">Andre trekk:</Typography>
+                  <Typography variant="body2" color="error">Andre trekk:</Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="body2" align="right">
+                  <Typography variant="body2" color="error" align="right">
                     -{details.otherDeductions.toLocaleString('nb-NO')} kr
                   </Typography>
                 </Grid>
+
+                {details.fixedSalary > 0 && (
+                  <>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="success.main">Fastlønn:</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="success.main" align="right">
+                        +{details.fixedSalary.toLocaleString('nb-NO')} kr
+                      </Typography>
+                    </Grid>
+                  </>
+                )}
+
+                <Grid item xs={12}><Divider sx={{ my: 1 }} /></Grid>
+
                 <Grid item xs={6}>
-                  <Typography variant="body2">Fastlønn:</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" align="right">
-                    +{details.fixedSalary.toLocaleString('nb-NO')} kr
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2">Bonus:</Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" align="right">
-                    +{details.bonus.toLocaleString('nb-NO')} kr
-                  </Typography>
-                </Grid>
-                <Grid item xs={12}>
-                  <Divider sx={{ my: 1 }} />
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="subtitle1" fontWeight="bold">
-                    Total provisjon:
-                  </Typography>
+                  <Typography variant="subtitle1" fontWeight="bold">Total utbetaling:</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="subtitle1" fontWeight="bold" align="right" color={theme.palette.success.main}>

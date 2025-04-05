@@ -206,7 +206,14 @@ function Employees() {
       
       if (error) throw error;
       
-      setSalaryModels(data || []);
+      // Sorter lønnstrinn slik at lønnstrinn 1 kommer først
+      const sortedModels = data.sort((a, b) => {
+        if (a.id === 1) return -1;
+        if (b.id === 1) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      
+      setSalaryModels(sortedModels || []);
     } catch (error) {
       console.error('Error fetching salary models:', error);
       setError('Failed to fetch salary models: ' + error.message);
@@ -304,25 +311,21 @@ function Employees() {
       setUploadError(null);
       setLoading(true);
       
-      // Process the actual company name if "new_department" was selected
-      let finalCompany = newEmployee.agent_company;
-      if (newEmployee.agent_company === 'new_department' && newEmployee.new_agent_company) {
-        finalCompany = newEmployee.new_agent_company.trim();
+      // Validering av påkrevde felt
+      if (!newEmployee.name || !newEmployee.email) {
+        setUploadError('Navn og e-post er påkrevd');
+        return;
       }
-      
-      // If manager, ensure they can only create/edit employees in their own office
-      if (userRole === 'manager') {
-        finalCompany = userOffice;
-        
-        // Managers can only create regular users, not other managers or admins
-        if (editMode === false) {
-          newEmployee.role = 'user';
-        }
-      }
-      
+
+      // Hvis lønnstrinn ikke er valgt, sett det til 1
+      const salary_model_id = newEmployee.salary_model_id || '1';
+
       const employeeData = {
         ...newEmployee,
-        agent_company: finalCompany
+        salary_model_id,
+        agent_company: newEmployee.agent_company === 'new_department' 
+          ? newEmployee.new_agent_company 
+          : newEmployee.agent_company
       };
       
       // Remove any temporary fields
@@ -347,8 +350,8 @@ function Employees() {
         setUploadSuccess(true);
         
         // If a new department was added, update the departments list
-        if (finalCompany && !departments.includes(finalCompany)) {
-          setDepartments([...departments, finalCompany].sort());
+        if (employeeData.agent_company && !departments.includes(employeeData.agent_company)) {
+          setDepartments([...departments, employeeData.agent_company].sort());
         }
       }
       

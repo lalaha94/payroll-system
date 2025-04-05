@@ -1,56 +1,69 @@
 import { createClient } from '@supabase/supabase-js';
 
-// For Vite, environment variables need to be prefixed with VITE_
-// Access them using import.meta.env instead of process.env
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://dggxkmxohsnoxetjcyod.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRnZ3hrbXhvaHNub3hldGpjeW9kIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI0Nzc4NDEsImV4cCI6MjA1ODA1Mzg0MX0.798ljOnRxPpZVLXBG2lXDe1XVJVn_S53_TEMv4z_eDE';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('Mangler Supabase-konfigurasjon. Sjekk .env-filen din.');
+  console.error('Du trenger følgende i .env-filen:');
+  console.error('VITE_SUPABASE_URL=din-supabase-url');
+  console.error('VITE_SUPABASE_ANON_KEY=din-anon-key');
+}
 
 // More detailed logging
 console.log(`Initializing Supabase with URL: ${supabaseUrl}`);
-console.log(`Using anonymous key: ${supabaseAnonKey.substring(0, 5)}...`);
+console.log(`Using anonymous key: ${supabaseAnonKey?.substring(0, 5)}...`);
 
-// Create a Supabase client with better error handling
-let supabase;
-try {
-  supabase = createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true
+// Opprett Supabase-klient
+const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true
+  },
+  global: {
+    headers: {
+      'Accept': 'application/json',
+      'apikey': supabaseAnonKey
     }
-  });
-  console.log('Supabase client initialized successfully');
-  
-  // Test connection
-  window.setTimeout(async () => {
-    try {
-      const { data, error } = await supabase.from('salary_models').select('id').limit(1);
+  }
+});
+
+// Test tilkobling
+const testConnection = async () => {
+  try {
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      console.error('Feil ved henting av sesjon:', sessionError.message);
+      return;
+    }
+
+    if (session) {
+      console.log('Pålogget som:', session.user.email);
+      
+      // Test tilgang til employees-tabellen
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('email', session.user.email);
+      
       if (error) {
-        console.error('Connection test error:', error);
+        console.error('Feil ved henting av ansattdata:', error.message);
+      } else if (data && data.length > 0) {
+        console.log('Vellykket tilgang til ansattdata:', data[0]);
       } else {
-        console.log('Connection test successful:', data);
+        console.log('Ingen ansattdata funnet for denne brukeren');
       }
-    } catch (err) {
-      console.error('Connection test failed:', err);
+    } else {
+      console.log('Ingen aktiv sesjon funnet');
     }
-  }, 1000);
-  
-} catch (error) {
-  console.error('Failed to initialize Supabase client:', error);
-  // Create a mock client to prevent application crashes
-  supabase = {
-    from: () => ({
-      select: () => Promise.resolve({ data: [], error: new Error('Supabase client not initialized') }),
-      insert: () => Promise.resolve({ data: null, error: new Error('Supabase client not initialized') }),
-      update: () => Promise.resolve({ data: null, error: new Error('Supabase client not initialized') }),
-      delete: () => Promise.resolve({ data: null, error: new Error('Supabase client not initialized') }),
-    }),
-    auth: {
-      signInWithPassword: () => Promise.resolve({ user: null, error: new Error('Supabase client not initialized') }),
-      signOut: () => Promise.resolve({ error: null }),
-      getSession: () => Promise.resolve({ data: { session: null }, error: null }),
-      getUser: () => Promise.resolve({ data: { user: null }, error: null }),
-    },
-  };
-}
+  } catch (err) {
+    console.error('Tilkoblingsfeil:', err.message);
+  }
+};
+
+// Kjør tilkoblingstest
+testConnection();
 
 export { supabase };
