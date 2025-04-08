@@ -480,7 +480,9 @@ function SalesDataDashboard() {
         approvalInfoStatus: approvalInfo?.apply_five_percent_deduction,
         finalApplyFivePercent,
         totalBeforeDeductions: commissionResult.details.totalBeforeDeductions,
-        finalCommission: commissionResult.details.finalCommission
+        finalCommission: commissionResult.details.finalCommission,
+        originalBonusAmount: agent.bonusAmount,
+        approvalBonusAmount: approvalInfo?.bonus_amount
       });
       
       return {
@@ -497,10 +499,13 @@ function SalesDataDashboard() {
           tjenestetorget: parseFloat(approvalInfo.tjenestetorget) || 0,
           bytt: parseFloat(approvalInfo.bytt) || 0,
           other_deductions: parseFloat(approvalInfo.other_deductions) || 0,
-          apply_five_percent_deduction: approvalInfo.apply_five_percent_deduction
+          apply_five_percent_deduction: approvalInfo.apply_five_percent_deduction,
+          bonus_amount: parseFloat(approvalInfo.bonus_amount) || 0
         } : null,
         // Sett endelig applyFivePercent verdi basert på beregningen ovenfor
-        applyFivePercent: finalApplyFivePercent
+        applyFivePercent: finalApplyFivePercent,
+        // Hvis godkjent, bruk bonusAmount fra approvalInfo, ellers bruk opprinnelig bonusAmount
+        bonusAmount: approvalInfo ? (parseFloat(approvalInfo.bonus_amount) || 0) : (agent.bonusAmount || 0)
       };
     });
   }, [filteredAgentData, salaryModels, approvalData, tenderData]);
@@ -707,14 +712,18 @@ function SalesDataDashboard() {
       name: agent.agent_name,
       applyFivePercent: agent.applyFivePercent,
       totalBeforeDeductions: agent.totalBeforeDeductions,
-      approvalInfo: agent.approvalInfo
+      approvalInfo: agent.approvalInfo,
+      bonusAmount: agent.bonusAmount,
+      approvalBonusAmount: agent.approvalInfo?.bonus_amount
     });
     
     setSelectedAgent({
       ...agent,
       // Sikre at applyFivePercent og totalBeforeDeductions overføres korrekt
       applyFivePercent: agent.applyFivePercent,
-      totalBeforeDeductions: agent.totalBeforeDeductions
+      totalBeforeDeductions: agent.totalBeforeDeductions,
+      // Bruk bonusAmount fra approvalInfo hvis agenten er godkjent, ellers bruk agent.bonusAmount
+      bonusAmount: agent.isApproved ? agent.approvalInfo?.bonus_amount || 0 : agent.bonusAmount || 0
     });
     setApprovalDialogOpen(true);
   };
@@ -737,7 +746,8 @@ function SalesDataDashboard() {
         applyFivePercent: selectedAgent.applyFivePercent,
         commission: selectedAgent.commission,
         totalBeforeDeductions: selectedAgent.totalBeforeDeductions,
-        finalCommission: selectedAgent.finalCommission
+        finalCommission: selectedAgent.finalCommission,
+        bonusAmount: selectedAgent.bonusAmount
       });
 
       const { error } = await supabase
@@ -752,7 +762,8 @@ function SalesDataDashboard() {
           tjenestetorget: tenderInfo.tjenestetorget,
           bytt: tenderInfo.bytt,
           other_deductions: tenderInfo.other,
-          apply_five_percent_deduction: selectedAgent.applyFivePercent
+          apply_five_percent_deduction: selectedAgent.applyFivePercent,
+          bonus_amount: selectedAgent.bonusAmount || 0
         })
         .eq('id', selectedAgent.approvalInfo.id);
       
@@ -780,7 +791,8 @@ function SalesDataDashboard() {
                 tjenestetorget: tenderInfo.tjenestetorget,
                 bytt: tenderInfo.bytt,
                 other_deductions: tenderInfo.other,
-                apply_five_percent_deduction: selectedAgent.applyFivePercent
+                apply_five_percent_deduction: selectedAgent.applyFivePercent,
+                bonus_amount: selectedAgent.bonusAmount || 0
               },
               // Pass på at applyFivePercent er oppdatert i agent-objektet
               applyFivePercent: selectedAgent.applyFivePercent,
@@ -977,370 +989,152 @@ function SalesDataDashboard() {
       {/* Tabs for different views */}
       <Paper sx={{ mb: 3, borderRadius: 2 }}>
         <Tabs 
-          value={tabValue} 
-          onChange={handleTabChange}
+          value={0} 
           indicatorColor="primary"
           textColor="primary"
           variant="fullWidth"
         >
-          <Tab label="Oversikt" />
-          <Tab label="Kontorer" />
-          <Tab label="Agenter" />
+          <Tab label="Agentoversikt for 2024/12" />
         </Tabs>
         
         <Box sx={{ p: 3 }}>
-          {/* Tab 1: Overview */}
-          {tabValue === 0 && (
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={8}>
-                <Typography variant="h6" gutterBottom>
-                  Provisjonsutvikling over tid
-                </Typography>
-                <Box sx={{ height: 350 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart
-                      data={getMonthlyTrendData()}
-                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="displayMonth" />
-                      <YAxis />
-                      <RechartsTooltip formatter={(value) => `${value.toLocaleString('no-NO')} kr`} />
-                      <Legend />
-                      <Line 
-                        type="monotone" 
-                        dataKey="totalCommission" 
-                        name="Beregnet provisjon" 
-                        stroke={CHART_COLORS[0]} 
-                        activeDot={{ r: 8 }}
-                      />
-                      <Line 
-                        type="monotone" 
-                        dataKey="approvedCommission" 
-                        name="Godkjent provisjon" 
-                        stroke={CHART_COLORS[2]} 
-                        strokeDasharray="5 5" 
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </Box>
-              </Grid>
-              
-              <Grid item xs={12} md={4}>
-                <Typography variant="h6" gutterBottom>
-                  Produktfordeling
-                </Typography>
-                <Box sx={{ height: 350 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={getProductDistributionData()}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        outerRadius={120}
-                        fill="#8884d8"
-                        dataKey="value"
-                        nameKey="name"
-                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {getProductDistributionData().map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <RechartsTooltip formatter={(value) => `${value.toLocaleString('no-NO')} kr`} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </Box>
-              </Grid>
-              
-              <Grid item xs={12}>
-                <Typography variant="h6" gutterBottom>
-                  Godkjenninger per kontor
-                </Typography>
-                <Box sx={{ height: 350 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={officeDataArray}
-                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis yAxisId="left" orientation="left" stroke={CHART_COLORS[0]} />
-                      <YAxis yAxisId="right" orientation="right" stroke={CHART_COLORS[1]} />
-                      <RechartsTooltip formatter={(value, name) => {
-                        if (name === 'Antall godkjenninger') return value;
-                        return `${value.toLocaleString('no-NO')} kr`;
-                      }} />
-                      <Legend />
-                      <Bar yAxisId="left" dataKey="count" name="Antall godkjenninger" fill={CHART_COLORS[0]} />
-                      <Bar yAxisId="right" dataKey="amount" name="Total godkjent provisjon" fill={CHART_COLORS[1]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </Box>
-              </Grid>
-            </Grid>
-          )}
-          
-          {/* Tab 2: Companies */}
-          {tabValue === 1 && (
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Kontoroversikt for {selectedMonth ? formatMonth(selectedMonth) : 'valgt periode'}
-              </Typography>
-              
-              <TableContainer component={Paper} variant="outlined">
-                <Table>
-                  <TableHead>
-                    <TableRow sx={{ backgroundColor: theme.palette.action.hover }}>
-                      <TableCell>Kontor</TableCell>
-                      <TableCell align="right">Antall agenter</TableCell>
-                      <TableCell align="right">Godkjent</TableCell>
-                      <TableCell align="right">Totalt salg</TableCell>
-                      <TableCell align="right">Beregnet provisjon</TableCell>
-                      <TableCell align="right">5% trekk</TableCell>
-                      <TableCell align="right">Anbudstrekk</TableCell>
-                      <TableCell align="right">Godkjent provisjon</TableCell>
-                      <TableCell align="right">Differanse</TableCell>
-                      <TableCell align="center">Status</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {getCompanyPerformanceData().map((company) => (
-                      <TableRow key={company.name} hover>
-                        <TableCell>{company.name}</TableCell>
-                        <TableCell align="right">{company.agentCount}</TableCell>
-                        <TableCell align="right">
-                          <Typography variant="body2">
-                            {company.approvedAgentCount} av {company.agentCount}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            ({company.approvalRate.toFixed(1)}%)
-                          </Typography>
+          {/* Agentoversikt */}
+          <Box>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow sx={{ backgroundColor: theme.palette.action.hover }}>
+                    <TableCell>Agent</TableCell>
+                    <TableCell>Kontor</TableCell>
+                    <TableCell>Lønnstrinn</TableCell>
+                    <TableCell align="right">Liv-salg</TableCell>
+                    <TableCell align="right">Skade-salg</TableCell>
+                    <TableCell align="right">Totalt salg</TableCell>
+                    <TableCell align="right">Beregnet provisjon</TableCell>
+                    <TableCell align="right">5% trekk</TableCell>
+                    <TableCell align="right">Anbudstrekk</TableCell>
+                    <TableCell align="right">Bonus</TableCell>
+                    <TableCell align="right">Godkjent provisjon</TableCell>
+                    <TableCell align="center">Status</TableCell>
+                    <TableCell align="right">Handling</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {sortedAgents.map((agent) => {
+                    const tenderKey = `${agent.agent_name}-${selectedMonth}`;
+                    const tenderInfo = tenderData[tenderKey] || { tjenestetorget: 0, bytt: 0, other: 0 };
+                    const salaryModel = salaryModels.find(model => model.id === agent.salary_model_id);
+                    
+                    // Logg for debugging
+                    console.log(`Agent ${agent.agent_name} applyFivePercent:`, {
+                      name: agent.agent_name,
+                      applyFivePercent: agent.applyFivePercent,
+                      isApproved: agent.isApproved,
+                      approvalInfo: agent.approvalInfo
+                    });
+                    
+                    return (
+                      <TableRow key={`${agent.agent_name}-${agent.monthKey}`} hover>
+                        <TableCell>{agent.agent_name}</TableCell>
+                        <TableCell>{agent.agent_company || 'Ukjent'}</TableCell>
+                        <TableCell>
+                          {salaryModel ? (
+                            <Tooltip title={`Liv: ${salaryModel.commission_liv || 0}%, Skade: ${salaryModel.commission_skade || 0}%`}>
+                              <Chip 
+                                label={salaryModel.name} 
+                                size="small" 
+                                color="primary"
+                                variant="outlined"
+                              />
+                            </Tooltip>
+                          ) : (
+                            <Tooltip title="Lønnstrinn 1 (standard)">
+                              <Chip 
+                                label="Lønnstrinn 1" 
+                                size="small" 
+                                color="default"
+                                variant="outlined"
+                              />
+                            </Tooltip>
+                          )}
                         </TableCell>
-                        <TableCell align="right">{(company.totalPremium || 0).toLocaleString('no-NO')} kr</TableCell>
-                        <TableCell align="right">{(company.totalCommission || 0).toLocaleString('no-NO')} kr</TableCell>
+                        <TableCell align="right">{formatCurrency(agent.livPremium || 0)}</TableCell>
+                        <TableCell align="right">{formatCurrency(agent.skadePremium || 0)}</TableCell>
+                        <TableCell align="right">{formatCurrency(agent.totalPremium || 0)}</TableCell>
+                        <TableCell align="right">{formatCurrency(agent.commission || 0)}</TableCell>
                         <TableCell align="right">
-                          {company.fivePercentDeductions > 0 ? 
-                            `${(company.fivePercentDeductions || 0).toLocaleString('no-NO')} kr` : 
-                            '0 kr'}
+                          {agent.applyFivePercent ? (
+                            <Tooltip title="5% trekk er aktivt basert på ansettelsestid eller manuell innstilling">
+                              <Box sx={{ color: theme.palette.warning.main }}>
+                                {formatCurrency(agent.commission * 0.05)}
+                              </Box>
+                            </Tooltip>
+                          ) : (
+                            <Box sx={{ color: theme.palette.text.secondary }}>
+                              0 kr
+                            </Box>
+                          )}
                         </TableCell>
                         <TableCell align="right">
-                          {company.tenderDeductions > 0 ? 
-                            `${(company.tenderDeductions || 0).toLocaleString('no-NO')} kr` : 
-                            '0 kr'}
+                          {agent.isApproved ? 
+                            formatCurrency(
+                              (parseFloat(agent.approvalInfo?.tjenestetorget || 0) || 0) + 
+                              (parseFloat(agent.approvalInfo?.bytt || 0) || 0) + 
+                              (parseFloat(agent.approvalInfo?.other_deductions || 0) || 0)
+                            ) : 
+                            formatCurrency(
+                              (parseFloat(tenderInfo?.tjenestetorget || 0) || 0) + 
+                              (parseFloat(tenderInfo?.bytt || 0) || 0) + 
+                              (parseFloat(tenderInfo?.other || 0) || 0)
+                            )
+                          }
                         </TableCell>
-                        <TableCell align="right" sx={{ position: 'relative' }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 0.5 }}>
-                            {(company.approvedCommission || 0)?.toLocaleString('nb-NO')} kr
-                            {company.approvedCommission !== company.totalCommission && (
-                              <Tooltip
-                                title={
-                                  <Box>
-                                    <Typography variant="body2" fontWeight="bold">Detaljer:</Typography>
-                                    <Typography variant="body2">Beregnet provisjon: {(company.totalCommission || 0)?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2">5% trekk: {(company.fivePercentDeductions || 0)?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2">Anbudstrekk: {(company.tenderDeductions || 0)?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2">Totalt trekk: {(company.deductions || 0)?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2">Bonus: {(company.bonus || 0)?.toLocaleString('nb-NO')} kr</Typography>
-                                    <Typography variant="body2" fontWeight="bold">
-                                      Total provisjon: {(company.approvedCommission || 0)?.toLocaleString('nb-NO')} kr
-                                    </Typography>
-                                  </Box>
-                                }
-                                arrow
-                                placement="top"
-                              >
-                                <Info fontSize="small" color="action" />
-                              </Tooltip>
-                            )}
-                          </Box>
+                        <TableCell align="right">
+                          {agent.isApproved ? 
+                            formatCurrency(agent.approvalInfo?.bonus_amount || 0) : 
+                            formatCurrency(agent.bonusAmount || 0)}
                         </TableCell>
-                        <TableCell 
-                          align="right"
-                          sx={{ 
-                            color: company.difference === 0 
-                              ? 'text.primary' 
-                              : company.difference > 0 
-                                ? 'success.main' 
-                                : 'error.main'
-                          }}
-                        >
-                          {`${company.difference > 0 ? '+' : ''}${(company.difference || 0).toLocaleString('no-NO')} kr`}
-                          <br />
-                          <Typography variant="caption">
-                            {`(${company.percentDiff > 0 ? '+' : ''}${(company.percentDiff || 0).toFixed(1)}%)`}
-                          </Typography>
+                        <TableCell align="right">
+                          {agent.isApproved ? 
+                            formatCurrency(agent.approvalInfo?.approved_commission || agent.commission || 0) : 
+                            formatCurrency(agent.finalCommission || 0)}
                         </TableCell>
                         <TableCell align="center">
-                          {company.approvalRate === 100 ? (
+                          {agent.isApproved ? (
                             <Chip 
-                              label="Fullstendig godkjent" 
-                              color="success" 
-                              size="small" 
                               icon={<CheckCircle />} 
-                            />
-                          ) : company.approvalRate > 0 ? (
-                            <Chip 
-                              label="Delvis godkjent" 
-                              color="warning" 
-                              size="small" 
-                              icon={<Info />} 
+                              label="Godkjent" 
+                              color="success" 
+                              size="small"
                             />
                           ) : (
                             <Chip 
-                              label="Ikke godkjent" 
-                              color="default" 
-                              size="small" 
                               icon={<Cancel />} 
+                              label="Ikke godkjent" 
+                              color="error" 
+                              size="small"
                             />
                           )}
                         </TableCell>
+                        <TableCell align="right">
+                          <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
+                            <Button
+                              variant={agent.isApproved ? "outlined" : "contained"}
+                              color={agent.isApproved ? "error" : "primary"}
+                              size="small"
+                              onClick={() => agent.isApproved ? openRevokeDialog(agent) : openApprovalDialog(agent)}
+                            >
+                              {agent.isApproved ? 'Tilbakekall' : 'Godkjenn'}
+                            </Button>
+                          </Box>
+                        </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          )}
-          
-          {/* Tab 3: Agents */}
-          {tabValue === 2 && (
-            <Box>
-              <Typography variant="h6" gutterBottom>
-                Agentoversikt for {selectedMonth ? formatMonth(selectedMonth) : 'valgt periode'}
-              </Typography>
-              
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ backgroundColor: theme.palette.action.hover }}>
-                      <TableCell>Agent</TableCell>
-                      <TableCell>Kontor</TableCell>
-                      <TableCell>Lønnstrinn</TableCell>
-                      <TableCell align="right">Liv-salg</TableCell>
-                      <TableCell align="right">Skade-salg</TableCell>
-                      <TableCell align="right">Totalt salg</TableCell>
-                      <TableCell align="right">Beregnet provisjon</TableCell>
-                      <TableCell align="right">5% trekk</TableCell>
-                      <TableCell align="right">Anbudstrekk</TableCell>
-                      <TableCell align="right">Godkjent provisjon</TableCell>
-                      <TableCell align="center">Status</TableCell>
-                      <TableCell align="right">Handling</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {sortedAgents.map((agent) => {
-                      const tenderKey = `${agent.agent_name}-${selectedMonth}`;
-                      const tenderInfo = tenderData[tenderKey] || { tjenestetorget: 0, bytt: 0, other: 0 };
-                      const salaryModel = salaryModels.find(model => model.id === agent.salary_model_id);
-                      
-                      // Logg for debugging
-                      console.log(`Agent ${agent.agent_name} applyFivePercent:`, {
-                        name: agent.agent_name,
-                        applyFivePercent: agent.applyFivePercent,
-                        isApproved: agent.isApproved,
-                        approvalInfo: agent.approvalInfo
-                      });
-                      
-                      return (
-                        <TableRow key={`${agent.agent_name}-${agent.monthKey}`} hover>
-                          <TableCell>{agent.agent_name}</TableCell>
-                          <TableCell>{agent.agent_company || 'Ukjent'}</TableCell>
-                          <TableCell>
-                            {salaryModel ? (
-                              <Tooltip title={`Liv: ${salaryModel.commission_liv || 0}%, Skade: ${salaryModel.commission_skade || 0}%`}>
-                                <Chip 
-                                  label={salaryModel.name} 
-                                  size="small" 
-                                  color="primary"
-                                  variant="outlined"
-                                />
-                              </Tooltip>
-                            ) : (
-                              <Tooltip title="Lønnstrinn 1 (standard)">
-                                <Chip 
-                                  label="Lønnstrinn 1" 
-                                  size="small" 
-                                  color="default"
-                                  variant="outlined"
-                                />
-                              </Tooltip>
-                            )}
-                          </TableCell>
-                          <TableCell align="right">{formatCurrency(agent.livPremium || 0)}</TableCell>
-                          <TableCell align="right">{formatCurrency(agent.skadePremium || 0)}</TableCell>
-                          <TableCell align="right">{formatCurrency(agent.totalPremium || 0)}</TableCell>
-                          <TableCell align="right">{formatCurrency(agent.commission || 0)}</TableCell>
-                          <TableCell align="right">
-                            {agent.applyFivePercent ? (
-                              <Tooltip title="5% trekk er aktivt basert på ansettelsestid eller manuell innstilling">
-                                <Box sx={{ color: theme.palette.warning.main }}>
-                                  {formatCurrency(agent.commission * 0.05)}
-                                </Box>
-                              </Tooltip>
-                            ) : (
-                              <Box sx={{ color: theme.palette.text.secondary }}>
-                                0 kr
-                              </Box>
-                            )}
-                          </TableCell>
-                          <TableCell align="right">
-                            {agent.isApproved ? 
-                              formatCurrency(
-                                (parseFloat(agent.approvalInfo?.tjenestetorget || 0) || 0) + 
-                                (parseFloat(agent.approvalInfo?.bytt || 0) || 0) + 
-                                (parseFloat(agent.approvalInfo?.other_deductions || 0) || 0)
-                              ) : 
-                              formatCurrency(
-                                (parseFloat(tenderInfo?.tjenestetorget || 0) || 0) + 
-                                (parseFloat(tenderInfo?.bytt || 0) || 0) + 
-                                (parseFloat(tenderInfo?.other || 0) || 0)
-                              )
-                            }
-                          </TableCell>
-                          <TableCell align="right">
-                            {agent.isApproved ? 
-                              formatCurrency(agent.approvalInfo?.approved_commission || agent.commission || 0) : 
-                              formatCurrency(agent.finalCommission || 0)}
-                          </TableCell>
-                          <TableCell align="center">
-                            {agent.isApproved ? (
-                              <Chip 
-                                icon={<CheckCircle />} 
-                                label="Godkjent" 
-                                color="success" 
-                                size="small"
-                              />
-                            ) : (
-                              <Chip 
-                                icon={<Cancel />} 
-                                label="Ikke godkjent" 
-                                color="error" 
-                                size="small"
-                              />
-                            )}
-                          </TableCell>
-                          <TableCell align="right">
-                            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end' }}>
-                              <Button
-                                variant={agent.isApproved ? "outlined" : "contained"}
-                                color={agent.isApproved ? "error" : "primary"}
-                                size="small"
-                                onClick={() => agent.isApproved ? openRevokeDialog(agent) : openApprovalDialog(agent)}
-                              >
-                                {agent.isApproved ? 'Tilbakekall' : 'Godkjenn'}
-                              </Button>
-                            </Box>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          )}
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
         </Box>
       </Paper>
 
@@ -1395,6 +1189,26 @@ function SalesDataDashboard() {
                     ))}
                   </Select>
                 </FormControl>
+              </Box>
+
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle2" gutterBottom>Bonus</Typography>
+                <TextField
+                  fullWidth
+                  label="Bonusbeløp"
+                  type="number"
+                  value={selectedAgent.bonusAmount || ''}
+                  onChange={(e) => {
+                    const newValue = parseFloat(e.target.value);
+                    setSelectedAgent(prev => ({
+                      ...prev,
+                      bonusAmount: isNaN(newValue) ? 0 : newValue
+                    }));
+                  }}
+                  InputProps={{
+                    startAdornment: <InputAdornment position="start">kr</InputAdornment>,
+                  }}
+                />
               </Box>
 
               <Box sx={{ mt: 3 }}>

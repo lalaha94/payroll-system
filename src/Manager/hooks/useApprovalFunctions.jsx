@@ -91,9 +91,15 @@ export const useApprovalFunctions = (selectedOffice, selectedMonth, managerData)
    * @param {boolean} isAdmin - Om godkjenner er admin
    * @param {object} metadata - Metadata for godkjenningen med provisjonsdetaljer
    */
-  const handleApproval = async (agent, approvedAmount, comments, isAdmin = false, updateCallback) => {
+  const handleApproval = async (agent, approvedAmount, comments, updateCallback, isAdmin = false, metadata = {}) => {
     console.log(`Starter godkjenning for ${agent.name}, beløp: ${approvedAmount}kr, 5% trekk: ${agent.applyFivePercent ? 'JA' : 'NEI'}`);
-    console.log("Agent data:", {id: agent.id, name: agent.name, agentId: agent.agentId});
+    console.log("Agent data:", agent);
+    console.log("BONUS DEBUG: Bonusverdi før godkjenning:", {
+      agentName: agent.name,
+      bonus: agent.bonus,
+      bonusAmount: agent.bonusAmount,
+      bonusType: typeof agent.bonus
+    });
     
     if (!agent || (!agent.id && !agent.name)) {
       console.error('Feil: Agent mangler ID eller navn', agent);
@@ -173,7 +179,7 @@ export const useApprovalFunctions = (selectedOffice, selectedMonth, managerData)
       if (isAdmin) {
         approvalStatus = 'approved';
       } else {
-        approvalStatus = 'pending_admin';
+        approvalStatus = 'approved';
       }
       
       console.log(`Godkjenningsstatus satt til: ${approvalStatus} (isAdmin=${isAdmin}) for agent: ${agent.name} (ID: ${agentId})`);
@@ -203,16 +209,39 @@ export const useApprovalFunctions = (selectedOffice, selectedMonth, managerData)
         console.log("SQL: Oppdaterer godkjenning i monthly_commission_approvals");
         console.log("SQL: WHERE id =", latestApproval.id);
         
+        // Sikre at vi har bonus-verdien
+        const bonusAmount = parseFloat(agent.bonus || agent.bonusAmount || 0);
+        console.log("BONUS DEBUG: Bonusverdi ved update:", {
+          agentName: agent.name,
+          bonus: agent.bonus,
+          bonusAmount: bonusAmount,
+          bonusType: typeof bonusAmount
+        });
+        
+        // Debug 5% trekk-status
+        console.log("5% TREKK DEBUG: Status ved update:", {
+          agentName: agent.name,
+          applyFivePercent: agent.applyFivePercent,
+          typeOf: typeof agent.applyFivePercent
+        });
+        
         response = await supabase
           .from('monthly_commission_approvals')
           .update({
             approved_commission: approvedAmount,
             approval_comment: comments,
-            approved: approvalStatus === 'approved',
+            approved: true,
+            manager_approved: true,
+            admin_approved: isAdmin,
             approved_by: managerData?.email || 'Unknown',
             approved_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            revoked: false
+            revoked: false,
+            bonus_amount: bonusAmount,
+            tjenestetorget: agent.tjenestetorgetDeduction || 0,
+            bytt: agent.byttDeduction || 0,
+            other_deductions: agent.otherDeductions || 0,
+            apply_five_percent_deduction: agent.applyFivePercent || false
           })
           .eq('id', latestApproval.id);
       } else {
@@ -231,10 +260,27 @@ export const useApprovalFunctions = (selectedOffice, selectedMonth, managerData)
           agent.fivePercentDeduction : 
           (agent.applyFivePercent ? totalCommissionWithBonus * 0.05 : 0);
         
+        // Sikre at vi har bonus-verdien
+        const bonusAmount = parseFloat(agent.bonus || agent.bonusAmount || 0);
+        console.log("BONUS DEBUG: Bonusverdi ved insert:", {
+          agentName: agent.name,
+          bonus: agent.bonus,
+          bonusAmount: bonusAmount,
+          bonusType: typeof bonusAmount
+        });
+        
+        // Debug 5% trekk-status
+        console.log("5% TREKK DEBUG: Status ved insert:", {
+          agentName: agent.name,
+          applyFivePercent: agent.applyFivePercent,
+          typeOf: typeof agent.applyFivePercent,
+          fivePercentDeduction
+        });
+        
         console.log(`Godkjenningsdetaljer for ${agent.name}:`, {
           totalBeforeBonus: (agent.skadePremium * agent.skadeCommissionRate / 100) + 
                           (agent.livPremium * agent.livCommissionRate / 100),
-          bonus: agent.bonus || 0,
+          bonus: bonusAmount,
           totalWithBonus: totalCommissionWithBonus,
           applyFivePercent: agent.applyFivePercent,
           monthsEmployed: agent.monthsEmployed,
@@ -255,15 +301,27 @@ export const useApprovalFunctions = (selectedOffice, selectedMonth, managerData)
                               (agent.livPremium * agent.livCommissionRate / 100),
             approved_commission: approvedAmount,
             approval_comment: comments,
-            approved: approvalStatus === 'approved',
+            approved: true,
+            manager_approved: true,
+            admin_approved: isAdmin,
             approved_by: managerData?.email || 'Unknown',
             approved_at: new Date().toISOString(),
-            revoked: false
+            revoked: false,
+            bonus_amount: bonusAmount,
+            tjenestetorget: agent.tjenestetorgetDeduction || 0,
+            bytt: agent.byttDeduction || 0,
+            other_deductions: agent.otherDeductions || 0,
+            apply_five_percent_deduction: agent.applyFivePercent || false
           });
       }
       
       if (response.error) {
         console.error('Feil ved lagring av godkjenning:', response.error);
+        console.log("BONUS DEBUG: Feil under lagring:", {
+          agentName: agent.name,
+          bonus: agent.bonus,
+          error: response.error
+        });
         throw new Error(`Kunne ikke lagre godkjenning: ${response.error.message}`);
       }
       

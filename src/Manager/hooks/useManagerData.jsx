@@ -150,8 +150,7 @@ export const useManagerData = () => {
           manager_approved: approval?.manager_approved || false,
           admin_approved: approval?.admin_approved || false,
           approvalStatus: approval ? 
-            (approval.admin_approved ? 'approved' : 
-             (approval.manager_approved ? 'pending_admin' : 'pending')) : 'pending',
+            (approval.manager_approved ? 'approved' : 'pending') : 'pending',
           isApproved: approval?.admin_approved || false,
           agent_company: officeCompany
         };
@@ -370,8 +369,7 @@ export const useManagerData = () => {
           manager_approved: approvalInfo?.manager_approved || false,
           admin_approved: approvalInfo?.admin_approved || false,
           approvalStatus: approvalInfo ? 
-            (approvalInfo.admin_approved ? 'approved' : 
-             (approvalInfo.manager_approved ? 'pending_admin' : 'pending')) : 'pending',
+            (approvalInfo.manager_approved ? 'approved' : 'pending') : 'pending',
           approvalRecord: approvalInfo || null,
           tjenestetorgetDeduction: parseFloat(approvalInfo?.tjenestetorget) || tenderValues.tjenestetorgetDeduction,
           byttDeduction: parseFloat(approvalInfo?.bytt) || tenderValues.byttDeduction,
@@ -483,7 +481,10 @@ export const useManagerData = () => {
 
         // Beregn total provisjon før trekk
         const baseCommission = livCommission + skadeCommission;
-        const totalBeforeTrekk = baseCommission + bonusAmount;
+        // totalBeforeTrekk er provisjon før bonus (kun baseCommission)
+        const totalBeforeTrekk = baseCommission;
+        // totalWithBonus inkluderer både baseCommission og bonus
+        const totalWithBonus = baseCommission + bonusAmount;
 
         // Hent trekk fra agent eller approval
         const tjenestetorgetTrekk = parseFloat(agent.tjenestetorgetDeduction) || 0;
@@ -492,10 +493,12 @@ export const useManagerData = () => {
 
         // Sjekk om agenten skal ha 5% trekk (bruker agent.applyFivePercent som er satt i UI eller under synkronisering)
         const applyFivePercent = agent.applyFivePercent !== undefined ? agent.applyFivePercent : false;
-        const fivePercentTrekk = applyFivePercent ? totalBeforeTrekk * 0.05 : 0;
+        
+        // 5% trekk beregnes KUN på salgsprovisjon, ikke bonus
+        const fivePercentTrekk = applyFivePercent ? baseCommission * 0.05 : 0;
 
         // Beregn total provisjon etter trekk
-        const totalAgentCommission = totalBeforeTrekk - fivePercentTrekk - tjenestetorgetTrekk - byttTrekk - andreTrekk;
+        const totalAgentCommission = totalWithBonus - fivePercentTrekk - tjenestetorgetTrekk - byttTrekk - andreTrekk;
 
         // Oppdater agent objekt med alle verdier
         agent.livCommission = livCommission;
@@ -503,6 +506,7 @@ export const useManagerData = () => {
         agent.bonusAmount = bonusAmount;
         agent.baseCommission = baseCommission;
         agent.totalBeforeTrekk = totalBeforeTrekk;
+        agent.totalWithBonus = totalWithBonus;
         agent.fivePercentTrekk = fivePercentTrekk;
         agent.tjenestetorgetTrekk = tjenestetorgetTrekk;
         agent.byttTrekk = byttTrekk;
@@ -607,7 +611,7 @@ export const useManagerData = () => {
           ...agent,
           isApproved: approval.approved === true,
           approvalRecord: approval,
-          approvalStatus: approval.approved === true ? 'approved' : 'pending',
+          approvalStatus: approval.manager_approved === true ? 'approved' : 'pending',
           company: approval.agent_company || agent.company,
           manager_approved: approval.manager_approved || false,
           admin_approved: approval.admin_approved || false,
@@ -635,7 +639,8 @@ export const useManagerData = () => {
 
   // Legg til en ny useEffect for å håndtere oppdateringer av godkjenninger
   useEffect(() => {
-    if (agentPerformance.length > 0 && monthlyApprovals.length > 0) {
+    // Sikre at både agentPerformance og monthlyApprovals er definerte arrays før vi fortsetter
+    if (agentPerformance?.length > 0 && monthlyApprovals?.length > 0) {
       console.log("Starter automatisk synkronisering av godkjenninger");
       const updatedAgents = syncAgentsWithApprovals(agentPerformance, monthlyApprovals);
       

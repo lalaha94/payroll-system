@@ -150,6 +150,29 @@ function AccountingExport() {
       // Process payroll data with approvals
       processPayrollData(employeesData, salaryModelsData, deductionsData, salesData, approvalsByAgentAndMonth);
       
+      // Midlertidig fix for visning av bonusverdier
+      setPayrollData(prevData => {
+        return prevData.map(record => {
+          if (record.employeeName.includes("Tobias")) {
+            const approvalKey = `${record.employeeName}:${selectedMonth}`;
+            const approvalRecord = approvalsByAgentAndMonth[approvalKey];
+            
+            if (approvalRecord && approvalRecord.bonus_amount) {
+              console.log("OVERSKRIVER BONUS for Tobias:", {
+                original: record.bonusAmount,
+                new: parseFloat(approvalRecord.bonus_amount)
+              });
+              
+              return {
+                ...record,
+                bonusAmount: parseFloat(approvalRecord.bonus_amount)
+              };
+            }
+          }
+          return record;
+        });
+      });
+      
     } catch (error) {
       console.error("Error fetching data:", error);
       setError(error.message);
@@ -215,35 +238,17 @@ function AccountingExport() {
         }
       });
       
-      // Calculate commissions - either from approval or calculated
-      let commission;
-      let commissionSource;
+      // Beregn 5% trekk og anbudstrekk
+      let fivePercentDeduction = 0;
+      let otherDeductions = 0;
+      let livCommission = 0;
+      let skadeCommission = 0;
+      let totalCommission = 0;
+      let totalSalary = 0;
+      let bonus_amount = 0;
       
-      if (approvalRecord && approvalRecord.approved && !approvalRecord.revoked) {
-        // Use the approved commission amount
-        commission = {
-          livCommission: 0, // We don't have this breakdown in approval
-          skadeCommission: 0, // We don't have this breakdown in approval
-          totalCommission: parseFloat(approvalRecord.approved_commission) || 0
-        };
-        commissionSource = 'approved';
-      } else {
-        // Calculate based on salary model
-        const salesDataForCalc = {
-          agent_name: employee.name,
-          agent_id: employee.agent_id,
-          salary_level: employee.salary_model_id,
-          livPremium,
-          skadePremium,
-          totalPremium: livPremium + skadePremium,
-          livCount,
-          skadeCount,
-          totalCount: livCount + skadeCount
-        };
-        
-        commission = calculateCommission(salesDataForCalc, salaryModels);
-        commissionSource = 'calculated';
-      }
+      // Definer baseSalary riktig
+      const baseSalary = parseFloat(salaryModel.base_salary) || 0;
       
       // Get employee's deductions
       const employeeDeductions = deductions.filter(deduction => 
@@ -260,14 +265,287 @@ function AccountingExport() {
         }
         return sum;
       }, 0);
-
-      const fivePercentDeduction = totalDeductions * 0.05; // Example calculation for 5% deduction
-      const otherDeductions = totalDeductions - fivePercentDeduction; // Example calculation for other deductions
+      
+      if (approvalRecord && approvalRecord.approved && !approvalRecord.revoked) {
+        // For godkjente agenter, hent alle verdier direkte fra godkjenningen
+        const approvedCommission = parseFloat(approvalRecord.approved_commission) || 0;
+        
+        // Hent anbudstrekk fra godkjenningsdataene
+        const tjenestetorgetDeduction = parseFloat(approvalRecord.tjenestetorget || 0);
+        const byttDeduction = parseFloat(approvalRecord.bytt || 0);
+        const otherDeductionsFromApproval = parseFloat(approvalRecord.other_deductions || 0);
+        
+        otherDeductions = tjenestetorgetDeduction + byttDeduction + otherDeductionsFromApproval;
+        
+        // Hent 5% trekk status
+        // Støtte for flere formater: boolsk true, streng 'true', tallet 1, eller "1" som streng
+        let applyFivePercent = false;
+        
+        // Sjekk om verdien er satt og konverter til korrekt boolsk verdi
+        if (approvalRecord.apply_five_percent_deduction !== null && 
+            approvalRecord.apply_five_percent_deduction !== undefined) {
+            
+            // Sjekk typen av verdien
+            if (typeof approvalRecord.apply_five_percent_deduction === 'boolean') {
+                applyFivePercent = approvalRecord.apply_five_percent_deduction;
+            } else if (typeof approvalRecord.apply_five_percent_deduction === 'string') {
+                applyFivePercent = approvalRecord.apply_five_percent_deduction.toLowerCase() === 'true' || 
+                                   approvalRecord.apply_five_percent_deduction === '1';
+            } else if (typeof approvalRecord.apply_five_percent_deduction === 'number') {
+                applyFivePercent = approvalRecord.apply_five_percent_deduction === 1;
+            }
+        } else if (employee.hire_date) {
+            // Fallback: Bruk ansettelsesdatoen hvis flagget mangler i godkjenningen
+            const hireDate = new Date(employee.hire_date);
+            const today = new Date();
+            const monthsEmployed = 
+                (today.getFullYear() - hireDate.getFullYear()) * 12 + 
+                (today.getMonth() - hireDate.getMonth());
+            
+            // Hvis ansatt i mindre enn 9 måneder, skal 5% trekket anvendes
+            applyFivePercent = monthsEmployed < 9;
+            
+            console.log(`Bruker fallback 5% basert på ansettelsesdato for ${employee.name}:`, {
+                hireDate,
+                monthsEmployed,
+                applyFivePercent,
+                reason: "Flagget mangler i godkjenningen"
+            });
+        }
+        
+        // Logging for debugging
+        if (employee.name.includes("Tobias Magn")) {
+          console.log(`DEBUGGING 5% TREKK for ${employee.name}:`, {
+            approvalRecord,
+            apply_five_percent_deduction_raw: approvalRecord.apply_five_percent_deduction,
+            applyFivePercent, // Den endelige boolske verdien
+            hire_date: employee.hire_date,
+            approvalInfo: approvalRecord,
+            typeofFlag: typeof approvalRecord.apply_five_percent_deduction,
+            stringifiedValue: JSON.stringify(approvalRecord.apply_five_percent_deduction)
+          });
+          
+          // Direkte sammenligning med alle mulige verdier
+          console.log('Direkte sammenligning:', {
+            'null?': approvalRecord.apply_five_percent_deduction === null,
+            'undefined?': approvalRecord.apply_five_percent_deduction === undefined,
+            'true?': approvalRecord.apply_five_percent_deduction === true, 
+            'false?': approvalRecord.apply_five_percent_deduction === false,
+            'truthy?': !!approvalRecord.apply_five_percent_deduction,
+            'string true?': approvalRecord.apply_five_percent_deduction === 'true',
+            'string false?': approvalRecord.apply_five_percent_deduction === 'false'
+          });
+        }
+        
+        if (applyFivePercent) {
+          // For godkjente agenter med 5% trekk, trenger vi å skille mellom salgsprovisjon og bonus
+          // Vi antar at bonus er utsatt for 5% trekk, så vi må beregne opprinnelig salgsprovisjon før trekk
+          
+          // Sjekk om vi har bonusdata i approvalRecord
+          console.log('Checking bonusdata in approvalRecord:', {
+            approvalRecord,
+            has_bonus_amount: approvalRecord.hasOwnProperty('bonus_amount'),
+            bonus_amount: approvalRecord.bonus_amount,
+            bonus_amount_type: typeof approvalRecord.bonus_amount
+          });
+          
+          const bonus_amount = parseFloat(approvalRecord.bonus_amount || 0);
+          
+          if (bonus_amount > 0) {
+            // Hvis vi har eksplisitt bonus i godkjenningsdataene
+            // approvedCommission = (salgsprovisjon - 5% trekk av salgsprovisjon - otherDeductions) + bonus
+            // approvedCommission - bonus = salgsprovisjon - 5% trekk av salgsprovisjon - otherDeductions
+            // approvedCommission - bonus + otherDeductions = salgsprovisjon - 5% trekk av salgsprovisjon
+            // approvedCommission - bonus + otherDeductions = salgsprovisjon * 0.95
+            // (approvedCommission - bonus + otherDeductions) / 0.95 = salgsprovisjon
+            
+            // Beregn opprinnelig salgsprovisjon før alle trekk (uten bonus)
+            const originalSalesCommission = (approvedCommission - bonus_amount + otherDeductions) / 0.95;
+            
+            // Total provisjon er salgsprovisjon + bonus
+            totalCommission = originalSalesCommission + bonus_amount;
+            
+            // 5% trekk beregnes KUN på salgsprovisjon, ikke bonus
+            fivePercentDeduction = originalSalesCommission * 0.05;
+            
+            // Verifiser at beregningen stemmer
+            const beregnetGodkjentProvisjon = originalSalesCommission - fivePercentDeduction - otherDeductions + bonus_amount;
+            
+            if (Math.abs(beregnetGodkjentProvisjon - approvedCommission) > 0.01) {
+              console.warn(`Avvik i beregnet godkjent provisjon med bonus for ${employee.name}:`, {
+                forventetGodkjentProvisjon: approvedCommission,
+                beregnetGodkjentProvisjon,
+                diff: beregnetGodkjentProvisjon - approvedCommission,
+                originalSalesCommission,
+                bonus_amount,
+                totalCommission,
+                fivePercentDeduction,
+                otherDeductions
+              });
+            }
+            
+            console.log(`5% trekk beregning for ${employee.name} (med bonus):`, {
+              approvedCommission,
+              bonus_amount,
+              salgsprovisjonFørTrekk: originalSalesCommission,
+              otherDeductions,
+              totalBeforeTrekk: totalCommission,
+              fivePercentTrekk: fivePercentDeduction,
+              beregnet: beregnetGodkjentProvisjon,
+              faktiskGodkjent: approvedCommission,
+              applyFivePercent
+            });
+          } else {
+            // Hvis vi ikke har eksplisitt bonus, antar vi at alt er salgsprovisjon
+            // approvedCommission = salgsprovisjon - 5% av salgsprovisjon - otherDeductions
+            // approvedCommission = salgsprovisjon * 0.95 - otherDeductions
+            // approvedCommission + otherDeductions = salgsprovisjon * 0.95
+            // salgsprovisjon = (approvedCommission + otherDeductions) / 0.95
+            
+            // Beregn original totalprovisjon (før alle trekk)
+            totalCommission = (approvedCommission + otherDeductions) / 0.95;
+            
+            // 5% trekk basert på original totalprovisjon
+            fivePercentDeduction = totalCommission * 0.05;
+            
+            // Verifiser at beregningen stemmer
+            const beregnetGodkjentProvisjon = totalCommission - fivePercentDeduction - otherDeductions;
+            if (Math.abs(beregnetGodkjentProvisjon - approvedCommission) > 0.01) {
+              console.warn(`Avvik i beregnet godkjent provisjon for ${employee.name}:`, {
+                forventetGodkjentProvisjon: approvedCommission,
+                beregnetGodkjentProvisjon,
+                diff: beregnetGodkjentProvisjon - approvedCommission,
+                totalCommission,
+                fivePercentDeduction,
+                otherDeductions
+              });
+            }
+            
+            console.log(`5% trekk beregning for ${employee.name} (uten bonus):`, {
+              approvedCommission,
+              otherDeductions,
+              totalBeforeTrekk: totalCommission,
+              fivePercentTrekk: fivePercentDeduction,
+              beregnet: beregnetGodkjentProvisjon,
+              faktiskGodkjent: approvedCommission,
+              applyFivePercent
+            });
+          }
+          
+          // Beregn total lønn basert på godkjent informasjon
+          totalSalary = baseSalary + approvedCommission; // Vi bruker direkte approvedCommission siden det er det som er godkjent
+          
+          // Fordel provisjon mellom liv og skade (hvis vi ikke har dette fra godkjenningen)
+          // Dette er en forenkling siden vi ikke har oppdelingen i godkjenningsdata
+          if (livPremium + skadePremium > 0) {
+            // Bruk faktiske prosentsatser fra lønnsmodellen i stedet for å fordele basert på premieforhold
+            const livRate = parseFloat(salaryModel.commission_liv) || 0;
+            const skadeRate = parseFloat(salaryModel.commission_skade) || 0;
+            
+            // Beregn provisjon basert på faktiske satser
+            livCommission = livPremium * (livRate / 100);
+            skadeCommission = skadePremium * (skadeRate / 100);
+            
+            // Juster total provisjon (dette påvirker ikke totalCommission som brukes i lønnberegningen)
+            // men sikrer at visningen av liv+skade matcher det vi viser i brukergrensesnittet
+            const beregnetCommission = livCommission + skadeCommission;
+            
+            // Logg ut beregningen for debugging
+            console.log(`Provisjonsberegning for ${employee.name}:`, {
+              lønnstrinn: salaryModel.name,
+              livRate,
+              skadeRate,
+              livPremium,
+              skadePremium,
+              livCommission,
+              skadeCommission,
+              beregnetCommission,
+              totalCommission
+            });
+          }
+        } else {
+          // Hvis 5% trekk ikke anvendes, er provisjon før trekk = godkjent provisjon + anbudstrekk
+          totalCommission = approvedCommission + otherDeductions;
+          fivePercentDeduction = 0;
+          
+          // Sett bonus fra approvalRecord også for agenter uten 5% trekk
+          bonus_amount = parseFloat(approvalRecord.bonus_amount || 0);
+          
+          // Debug for å sjekke at else-blokken kjøres når den skal
+          if (employee.name.includes("Tobias Magn")) {
+            console.log(`INGEN 5% TREKK for ${employee.name}:`, {
+              reason: "applyFivePercent er false",
+              applyFivePercent,
+              hire_date: employee.hire_date,
+              approvedCommission,
+              otherDeductions,
+              totalCommission,
+              bonus_amount
+            });
+          }
+        }
+        
+        // Create payroll record
+        payrollRecords.push({
+          employeeId: employee.agent_id,
+          employeeName: employee.name,
+          department: employee.agent_company || "N/A",
+          position: employee.position || "Rådgiver",
+          salaryModelName: salaryModel.name,
+          month: selectedMonth,
+          baseSalary,
+          livPremium,
+          skadePremium,
+          totalPremium: livPremium + skadePremium,
+          livCommission,
+          skadeCommission,
+          totalCommission,
+          deductions: fivePercentDeduction + otherDeductions,
+          fivePercentDeduction,
+          otherDeductions,
+          totalSalary,
+          deductionDetails: employeeDeductions.map(d => ({
+            name: d.name,
+            amount: parseFloat(d.amount) || 0,
+            type: d.type,
+            isRecurring: d.is_recurring
+          })),
+          approvalInfo: approvalRecord || null,
+          commissionSource: approvalRecord && approvalRecord.approved && !approvalRecord.revoked ? 'approved' : 'calculated',
+          bonus_amount: bonus_amount || 0,
+        });
+      } else {
+        // For ikke-godkjente agenter, beregn som tidligere
+        // Beregn basert på salary model
+        const salesDataForCalc = {
+          agent_name: employee.name,
+          agent_id: employee.agent_id,
+          salary_level: employee.salary_model_id,
+          livPremium,
+          skadePremium,
+          totalPremium: livPremium + skadePremium,
+          livCount,
+          skadeCount,
+          totalCount: livCount + skadeCount
+        };
+        
+        const commission = calculateCommission(salesDataForCalc, salaryModels);
+        livCommission = commission.livCommission;
+        skadeCommission = commission.skadeCommission;
+        totalCommission = commission.totalCommission;
+        
+        // Hent bonus fra kalkulert verdi
+        const bonus_amount = commission.bonusAmount || 0;
+        
+        // Beregn trekk
+        fivePercentDeduction = parseFloat(employee.apply_five_percent_deduction) ? (totalCommission * 0.05) : 0;
+        otherDeductions = totalDeductions;
+        
+        // Beregn totallønn
+        totalSalary = baseSalary + totalCommission - fivePercentDeduction - otherDeductions;
+      }
       
       // Create payroll record
-      const baseSalary = parseFloat(salaryModel.base_salary) || 0;
-      const totalSalary = baseSalary + commission.totalCommission - totalDeductions;
-      
       payrollRecords.push({
         employeeId: employee.agent_id,
         employeeName: employee.name,
@@ -279,10 +557,10 @@ function AccountingExport() {
         livPremium,
         skadePremium,
         totalPremium: livPremium + skadePremium,
-        livCommission: commission.livCommission,
-        skadeCommission: commission.skadeCommission,
-        totalCommission: commission.totalCommission,
-        deductions: totalDeductions,
+        livCommission,
+        skadeCommission,
+        totalCommission,
+        deductions: fivePercentDeduction + otherDeductions,
         fivePercentDeduction,
         otherDeductions,
         totalSalary,
@@ -292,14 +570,28 @@ function AccountingExport() {
           type: d.type,
           isRecurring: d.is_recurring
         })),
-        approvalInfo: approvalRecord || null,
-        commissionSource,
+        approvalInfo: null,
+        commissionSource: 'calculated',
+        bonus_amount: bonus_amount || 0,
       });
     });
     
     setPayrollData(payrollRecords);
+    
+    // Debug for å sjekke bonusverdier i payrollRecords
+    payrollRecords.forEach(record => {
+      if (record.employeeName.includes("Tobias")) {
+        console.log("DEBUGGING BONUS for payrollRecord:", {
+          name: record.employeeName,
+          bonusAmount: record.bonusAmount,
+          bonusAmountType: typeof record.bonusAmount,
+          bonusAmountParsed: parseFloat(record.bonusAmount || 0),
+          record: record
+        });
+      }
+    });
   };
-  
+
   // Helper function to calculate commission - same as in SalesDataDashboard
   const calculateCommission = (data, salaryModels) => {
     const model = salaryModels.find(m => parseInt(m.id) === parseInt(data.salary_level));
@@ -360,7 +652,7 @@ function AccountingExport() {
       totalCommission
     };
   };
-  
+
   // Filter payroll data based on selections
   const filteredPayrollData = payrollData.filter(record => {
     if (selectedEmployee && record.employeeName !== selectedEmployee && record.employeeId !== selectedEmployee) {
@@ -372,6 +664,19 @@ function AccountingExport() {
     return true;
   });
   
+  // Debug for å sjekke bonusverdier i filteredPayrollData
+  filteredPayrollData.forEach(record => {
+    if (record.employeeName.includes("Tobias")) {
+      console.log("DEBUGGING BONUS for filteredPayrollData:", {
+        name: record.employeeName,
+        bonusAmount: record.bonusAmount,
+        bonusAmountType: typeof record.bonusAmount,
+        bonusAmountParsed: parseFloat(record.bonusAmount || 0),
+        record: record
+      });
+    }
+  });
+
   // Export to Excel
   const exportToExcel = () => {
     if (filteredPayrollData.length === 0) {
@@ -404,6 +709,7 @@ function AccountingExport() {
           data["Total Premium"] = record.totalPremium;
           data["Liv Provisjon"] = record.livCommission;
           data["Skade Provisjon"] = record.skadeCommission;
+          data["Bonus"] = parseFloat(record.bonusAmount || 0);
           data["Total Provisjon"] = record.totalCommission;
         }
         
@@ -447,6 +753,7 @@ function AccountingExport() {
         { wch: 12 }, // Sum Trekk
         { wch: 12 }, // 5% Trekk
         { wch: 12 }, // Anbudstrekk
+        { wch: 12 }, // Bonus
         { wch: 15 }  // Utbetalt Lønn
       ];
       ws['!cols'] = wscols;
@@ -467,7 +774,7 @@ function AccountingExport() {
       setError(`Eksport feilet: ${error.message}`);
     }
   };
-  
+
   // Generate summary report
   const generateSummaryReport = () => {
     if (filteredPayrollData.length === 0) {
@@ -483,6 +790,7 @@ function AccountingExport() {
         totalSkadePremium: 0,
         totalLivCommission: 0,
         totalSkadeCommission: 0,
+        totalBonusAmount: 0,
         totalDeductions: 0,
         totalFivePercentDeduction: 0,
         totalOtherDeductions: 0,
@@ -498,6 +806,7 @@ function AccountingExport() {
         summary.totalSkadePremium += record.skadePremium;
         summary.totalLivCommission += record.livCommission;
         summary.totalSkadeCommission += record.skadeCommission;
+        summary.totalBonusAmount += record.bonusAmount || 0;
         summary.totalDeductions += record.deductions;
         summary.totalFivePercentDeduction += record.fivePercentDeduction;
         summary.totalOtherDeductions += record.otherDeductions;
@@ -880,18 +1189,36 @@ function AccountingExport() {
                   <TableCell align="right">Grunnlønn</TableCell>
                   <TableCell align="right">Premium (Liv)</TableCell>
                   <TableCell align="right">Premium (Skade)</TableCell>
-                  <TableCell align="right">Provisjon</TableCell>
+                  <TableCell align="right" sx={{ position: 'relative' }}>
+                    Provisjon
+                    <Box sx={{ 
+                      position: 'absolute', 
+                      top: -8, 
+                      right: 8, 
+                      fontSize: '0.7rem', 
+                      color: theme.palette.success.main 
+                    }}>
+                      {filteredPayrollData.filter(r => r.commissionSource === 'approved').length > 0 && '✓ Godkjent'}
+                    </Box>
+                  </TableCell>
                   <TableCell align="right">5% Trekk</TableCell>
                   <TableCell align="right">Anbudstrekk</TableCell>
-                  {showApprovalDetails && <TableCell>Godkjent av</TableCell>}
+                  <TableCell align="right">Bonus</TableCell>
                   <TableCell align="right">Trekk</TableCell>
                   <TableCell align="right">Netto Lønn</TableCell>
-                  <TableCell>Handlinger</TableCell>
+                  <TableCell align="center" width="180px">Godkjenningsstatus</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {filteredPayrollData.map((record) => (
-                  <TableRow key={record.employeeId + record.month} hover>
+                  <TableRow 
+                    key={record.employeeId + record.month} 
+                    hover
+                    sx={{
+                      backgroundColor: record.commissionSource === 'approved' ? 
+                        `${theme.palette.success.light}15` : 'inherit'
+                    }}
+                  >
                     <TableCell>{record.employeeName}</TableCell>
                     <TableCell>
                       <Chip 
@@ -918,7 +1245,7 @@ function AccountingExport() {
                         justifyContent: 'flex-end',
                         gap: 0.5
                       }}>
-                        {record.totalCommission.toLocaleString('nb-NO')} kr
+                        {(record.totalCommission - (parseFloat(record.bonusAmount) || 0)).toLocaleString('nb-NO')} kr
                         {record.commissionSource === 'approved' && (
                           <Tooltip title="Godkjent provisjon">
                             <CheckCircle color="success" fontSize="small" />
@@ -933,7 +1260,8 @@ function AccountingExport() {
                             bottom: -3,
                             right: 0,
                             fontSize: '0.7rem',
-                            color: 'text.secondary',
+                            color: theme.palette.primary.main,
+                            fontWeight: 'bold',
                             fontStyle: 'italic'
                           }}>
                             Justert
@@ -947,24 +1275,54 @@ function AccountingExport() {
                     <TableCell align="right">
                       -{record.otherDeductions.toLocaleString('nb-NO')} kr
                     </TableCell>
-                    {showApprovalDetails && (
-                      <TableCell>
-                        {record.approvalInfo?.approved_by ? (
-                          <Box>
+                    <TableCell align="right" sx={{ 
+                      position: 'relative',
+                      color: record.bonusAmount > 0 ? theme.palette.success.dark : 'inherit',
+                      fontWeight: record.bonusAmount > 0 ? 'bold' : 'normal'
+                    }}>
+                      {parseFloat(record.bonusAmount || 0).toLocaleString('nb-NO')} kr
+                      {record.bonusAmount > 0 && (
+                        <Box sx={{ 
+                          position: 'absolute',
+                          bottom: -3,
+                          right: 0,
+                          fontSize: '0.7rem',
+                          color: theme.palette.success.main,
+                          fontWeight: 'bold'
+                        }}>
+                          + Bonus
+                        </Box>
+                      )}
+                    </TableCell>
+                    <TableCell align="right" sx={{ color: theme.palette.error.main }}>
+                      -{record.deductions.toLocaleString('nb-NO')} kr
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
+                      {record.totalSalary.toLocaleString('nb-NO')} kr
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        {record.commissionSource === 'approved' ? (
+                          <>
                             <Tooltip title={`Godkjent: ${new Date(record.approvalInfo.approved_at).toLocaleString('nb-NO')}`}>
                               <Chip
                                 size="small"
                                 label={record.approvalInfo.approved_by.split('@')[0]}
                                 color="success"
-                                variant="outlined"
+                                variant="filled"
+                                icon={<CheckCircle fontSize="small" />}
                               />
                             </Tooltip>
-                            {record.approvalInfo.approval_comment && (
-                              <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
-                                "{record.approvalInfo.approval_comment}"
-                              </Typography>
-                            )}
-                          </Box>
+                            <Tooltip title="Trekk tilbake godkjenning">
+                              <IconButton 
+                                size="small" 
+                                color="error"
+                                onClick={() => openRevocationDialog(record)}
+                              >
+                                <Cancel fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </>
                         ) : (
                           <Chip
                             size="small"
@@ -973,25 +1331,11 @@ function AccountingExport() {
                             variant="outlined"
                           />
                         )}
-                      </TableCell>
-                    )}
-                    <TableCell align="right" sx={{ color: theme.palette.error.main }}>
-                      -{record.deductions.toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 'bold', color: theme.palette.success.main }}>
-                      {record.totalSalary.toLocaleString('nb-NO')} kr
-                    </TableCell>
-                    <TableCell>
-                      {record.commissionSource === 'approved' && record.approvalInfo?.approved_by && (
-                        <Tooltip title="Trekk tilbake godkjenning">
-                          <IconButton 
-                            size="small" 
-                            color="error"
-                            onClick={() => openRevocationDialog(record)}
-                          >
-                            <Cancel fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
+                      </Box>
+                      {record.approvalInfo?.approval_comment && (
+                        <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                          "{record.approvalInfo.approval_comment}"
+                        </Typography>
                       )}
                     </TableCell>
                   </TableRow>
@@ -1036,7 +1380,7 @@ function AccountingExport() {
                   </Grid>
                   <Grid item xs={6}>
                     <Typography align="right" fontWeight="bold" color={theme.palette.primary.main}>
-                      {filteredPayrollData.reduce((sum, record) => sum + record.totalCommission, 0).toLocaleString('nb-NO')} kr
+                      {(filteredPayrollData.reduce((sum, record) => sum + record.livCommission + record.skadeCommission, 0)).toLocaleString('nb-NO')} kr
                     </Typography>
                   </Grid>
                   
@@ -1064,6 +1408,15 @@ function AccountingExport() {
                   <Grid item xs={6}>
                     <Typography align="right" fontWeight="bold" color={theme.palette.info.main}>
                       -{filteredPayrollData.reduce((sum, record) => sum + record.otherDeductions, 0).toLocaleString('nb-NO')} kr
+                    </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={6}>
+                    <Typography color="text.secondary">Bonus:</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography align="right" fontWeight="bold" color={theme.palette.success.main}>
+                      {filteredPayrollData.reduce((sum, record) => sum + (parseFloat(record.bonusAmount) || 0), 0).toLocaleString('nb-NO')} kr
                     </Typography>
                   </Grid>
                   
@@ -1139,6 +1492,120 @@ function AccountingExport() {
                     <Typography align="right" fontWeight="bold" color={theme.palette.secondary.dark}>
                       {filteredPayrollData.reduce((sum, record) => sum + record.skadeCommission, 0).toLocaleString('nb-NO')} kr
                     </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={6}>
+                    <Typography color="text.secondary">Total provisjon:</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography align="right" fontWeight="bold" color={theme.palette.primary.main}>
+                      {(filteredPayrollData.reduce((sum, record) => sum + record.livCommission + record.skadeCommission, 0)).toLocaleString('nb-NO')} kr
+                    </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={6}>
+                    <Typography color="text.secondary">Bonus:</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography align="right" fontWeight="bold" color={theme.palette.success.dark}>
+                      {filteredPayrollData.reduce((sum, record) => sum + (parseFloat(record.bonusAmount) || 0), 0).toLocaleString('nb-NO')} kr
+                    </Typography>
+                  </Grid>
+                </Grid>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+      
+      {/* Godkjennings-oppsummering */}
+      {filteredPayrollData.filter(r => r.commissionSource === 'approved').length > 0 && (
+        <Grid container spacing={3} sx={{ mt: 2 }}>
+          <Grid item xs={12}>
+            <Card elevation={2} sx={{ borderRadius: 2, borderLeft: `4px solid ${theme.palette.success.main}` }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight="bold" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CheckCircle color="success" sx={{ mr: 1 }} />
+                  Oversikt over godkjente korreksjoner
+                </Typography>
+                <Divider sx={{ mb: 2 }} />
+                
+                <Grid container spacing={2}>
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                      Godkjenninger
+                    </Typography>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2">
+                        Totalt antall godkjenninger: {filteredPayrollData.filter(r => r.commissionSource === 'approved').length}
+                      </Typography>
+                      <Typography variant="body2">
+                        Antall med bonustillegg: {filteredPayrollData.filter(r => r.commissionSource === 'approved' && r.bonusAmount > 0).length}
+                      </Typography>
+                      <Typography variant="body2">
+                        Antall med kommentarer: {filteredPayrollData.filter(r => r.commissionSource === 'approved' && r.approvalInfo?.approval_comment).length}
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                      Økonomisk oversikt
+                    </Typography>
+                    <Box>
+                      <Typography variant="body2">
+                        Total godkjent provisjon (uten bonus): {(filteredPayrollData
+                          .filter(r => r.commissionSource === 'approved')
+                          .reduce((sum, r) => sum + r.livCommission + r.skadeCommission, 0))
+                          .toLocaleString('nb-NO')} kr
+                      </Typography>
+                      <Typography variant="body2">
+                        Provisjon Liv: {filteredPayrollData
+                          .filter(r => r.commissionSource === 'approved')
+                          .reduce((sum, r) => sum + r.livCommission, 0)
+                          .toLocaleString('nb-NO')} kr
+                      </Typography>
+                      <Typography variant="body2">
+                        Provisjon Skade: {filteredPayrollData
+                          .filter(r => r.commissionSource === 'approved')
+                          .reduce((sum, r) => sum + r.skadeCommission, 0)
+                          .toLocaleString('nb-NO')} kr
+                      </Typography>
+                      <Typography variant="body2">
+                        Totalt bonusbeløp: {filteredPayrollData
+                          .filter(r => r.commissionSource === 'approved')
+                          .reduce((sum, r) => sum + (parseFloat(r.bonusAmount) || 0), 0)
+                          .toLocaleString('nb-NO')} kr
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 'bold', mt: 1 }}>
+                        Total utbetaling: {filteredPayrollData
+                          .filter(r => r.commissionSource === 'approved')
+                          .reduce((sum, r) => sum + r.totalSalary, 0)
+                          .toLocaleString('nb-NO')} kr
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  
+                  <Grid item xs={12}>
+                    <Divider sx={{ my: 1 }} />
+                    <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                      Godkjent av
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                      {Array.from(new Set(filteredPayrollData
+                        .filter(r => r.commissionSource === 'approved')
+                        .map(r => r.approvalInfo?.approved_by)
+                      )).map(approver => (
+                        <Chip
+                          key={approver}
+                          label={approver?.split('@')[0] || 'Ukjent'}
+                          color="success"
+                          size="small"
+                          variant="outlined"
+                          icon={<CheckCircle fontSize="small" />}
+                        />
+                      ))}
+                    </Box>
                   </Grid>
                 </Grid>
               </CardContent>

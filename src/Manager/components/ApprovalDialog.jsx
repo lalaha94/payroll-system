@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -15,6 +15,8 @@ import {
   CircularProgress,
   FormHelperText,
   AlertTitle,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import { Comment, CheckCircle } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
@@ -41,6 +43,8 @@ const ApprovalDialog = ({
   fetchApprovals,
 }) => {
   const theme = useTheme();
+  const [bonus, setBonus] = useState(0);
+  const [applyFivePercent, setApplyFivePercent] = useState(false);
 
   // Beregn total provisjon basert på agentens data
   const calculateTotalProvision = (agent) => {
@@ -48,10 +52,11 @@ const ApprovalDialog = ({
 
     console.log("Beregner provisjon for agent:", agent.name, {
       id: agent.id,
-      applyFivePercent: agent.applyFivePercent,
+      applyFivePercent: applyFivePercent, // Bruk state-verdien
       monthsEmployed: agent.monthsEmployed,
       hireDate: agent.hireDate,
-      fivePercentDeduction: agent.fivePercentDeduction
+      fivePercentDeduction: agent.fivePercentDeduction,
+      bonus: bonus // Bruk statens bonus-verdi
     });
 
     // Bruk de forhåndsberegnede verdiene hvis de finnes
@@ -64,28 +69,28 @@ const ApprovalDialog = ({
         skadeCommission: agent.skadeCommission,
         bonusAmount: agent.bonusAmount,
         totalBeforeTrekk: agent.totalBeforeTrekk,
-        applyFivePercent: agent.applyFivePercent,
-        monthsEmployed: agent.monthsEmployed
+        applyFivePercent: applyFivePercent, // Bruk state-verdien
+        monthsEmployed: agent.monthsEmployed,
+        bonus: bonus // Bruk statens bonus-verdi
       });
       
       // Bruk forhåndsberegnede verdier
       const skadeCommission = agent.skadeCommission || 0;
       const livCommission = agent.livCommission || 0;
-      const bonusAmount = agent.bonusAmount || 0;
+      const bonusAmount = parseFloat(bonus) || 0; // Bruk statens bonus-verdi
       const totalBeforeDeductions = agent.totalBeforeTrekk || (skadeCommission + livCommission);
       const totalWithBonus = totalBeforeDeductions + bonusAmount;
       
-      // Beregn 5% trekket basert på det totale beløpet med bonus hvis flagget er satt
-      const applyFivePercent = agent.applyFivePercent !== undefined ? agent.applyFivePercent : false;
+      // Bruk state-verdien for applyFivePercent
       console.log("5% trekk status:", applyFivePercent, "for agent:", agent.name);
 
-      const fivePercentDeduction = applyFivePercent ? totalWithBonus * 0.05 : 0;
+      // 5% trekk beregnes KUN på salgsprovisjon (ikke bonus)
+      const fivePercentDeduction = applyFivePercent ? totalBeforeDeductions * 0.05 : 0;
       
       const tjenestetorgetDeduction = agent.tjenestetorgetDeduction || 0;
       const byttDeduction = agent.byttDeduction || 0;
       const otherDeductions = agent.otherDeductions || 0;
       const fixedSalary = agent.baseSalary || 0;
-      const bonus = agent.bonus || 0;
       
       // Samlet fradrag
       const deductions = fivePercentDeduction + tjenestetorgetDeduction + byttDeduction + otherDeductions;
@@ -99,7 +104,7 @@ const ApprovalDialog = ({
         bonusAmount,
         totalBeforeDeductions,
         totalWithBonus,
-        applyFivePercent: agent.applyFivePercent,
+        applyFivePercent, // Bruk state-verdien
         fivePercentDeduction,
         totalDeductions: deductions,
         finalTotal: total
@@ -118,7 +123,7 @@ const ApprovalDialog = ({
           byttDeduction,
           otherDeductions,
           fixedSalary,
-          bonus,
+          bonus: bonusAmount,
         },
       };
     } else {
@@ -127,23 +132,23 @@ const ApprovalDialog = ({
         livPremium: agent.livPremium,
         skadeCommissionRate: agent.skadeCommissionRate,
         livCommissionRate: agent.livCommissionRate,
-        applyFivePercent: agent.applyFivePercent,
+        applyFivePercent: applyFivePercent, // Bruk state-verdien
         monthsEmployed: agent.monthsEmployed,
-        bonus: agent.bonus
+        bonus: bonus // Bruk statens bonus-verdi
       });
       
       // Beregn fra grunnen av
       const skadeCommission = (agent.skadePremium || 0) * ((agent.skadeCommissionRate || 0) / 100);
       const livCommission = (agent.livPremium || 0) * ((agent.livCommissionRate || 0) / 100);
       const totalBeforeDeductions = skadeCommission + livCommission;
-      const bonus = agent.bonus || 0;
-      const totalWithBonus = totalBeforeDeductions + bonus;
+      const bonusAmount = parseFloat(bonus) || 0; // Bruk statens bonus-verdi
+      const totalWithBonus = totalBeforeDeductions + bonusAmount;
 
-      // 5% trekk basert på totalBeløp med bonus
-      const applyFivePercent = agent.applyFivePercent !== undefined ? agent.applyFivePercent : false;
+      // Bruk state-verdien for applyFivePercent
       console.log("5% trekk status:", applyFivePercent, "for agent:", agent.name);
 
-      const fivePercentDeduction = applyFivePercent ? totalWithBonus * 0.05 : 0;
+      // 5% trekk beregnes KUN på salgsprovisjon (ikke bonus)
+      const fivePercentDeduction = applyFivePercent ? totalBeforeDeductions * 0.05 : 0;
       const tjenestetorgetDeduction = agent.tjenestetorgetDeduction || 0;
       const byttDeduction = agent.byttDeduction || 0;
       const otherDeductions = agent.otherDeductions || 0;
@@ -152,7 +157,6 @@ const ApprovalDialog = ({
       const deductions = fivePercentDeduction + tjenestetorgetDeduction + byttDeduction + otherDeductions;
       
       const fixedSalary = agent.baseSalary || 0;
-      const bonusAmount = bonus;
 
       const total = totalWithBonus - deductions + fixedSalary;
       
@@ -161,10 +165,11 @@ const ApprovalDialog = ({
         livCommission,
         totalBeforeDeductions,
         totalWithBonus,
-        applyFivePercent: agent.applyFivePercent,
+        applyFivePercent, // Bruk state-verdien
         fivePercentDeduction,
         totalDeductions: deductions,
-        finalTotal: total
+        finalTotal: total,
+        bonusAmount
       });
 
       return {
@@ -185,19 +190,74 @@ const ApprovalDialog = ({
     }
   };
 
-  // Når dialogen åpnes, initialiser batchAmount til den beregnede totalen
+  // Initialiser bonusverdi og 5% trekk-status når dialogen åpnes
+  useEffect(() => {
+    if (open && selectedAgent) {
+      setBonus(selectedAgent.bonus || selectedAgent.bonusAmount || 0);
+      setApplyFivePercent(selectedAgent.applyFivePercent || false);
+      
+      if (selectedAgent) {
+        selectedAgent.bonus = parseFloat(selectedAgent.bonus || selectedAgent.bonusAmount || 0);
+      }
+      
+      console.log("BONUS DEBUG - Initialisert:", {
+        agentName: selectedAgent.name,
+        bonusValue: selectedAgent.bonus || selectedAgent.bonusAmount || 0,
+        applyFivePercent: selectedAgent.applyFivePercent
+      });
+    }
+  }, [open, selectedAgent]);
+
+  // Når dialogen åpnes, initialiser batchAmount
   useEffect(() => {
     if (open && selectedAgent) {
       const { total } = calculateTotalProvision(selectedAgent);
       setBatchAmount(total.toFixed(2));
     }
-  }, [open, selectedAgent, setBatchAmount]);
+  }, [open, selectedAgent, setBatchAmount, bonus, applyFivePercent]);
 
   if (!selectedAgent) {
     return null;
   }
 
   const { total, details } = calculateTotalProvision(selectedAgent);
+
+  const handleBonusChange = (e) => {
+    const newBonusValue = e.target.value ? parseFloat(e.target.value) : 0;
+    setBonus(newBonusValue);
+    
+    if (selectedAgent) {
+      selectedAgent.bonus = newBonusValue;
+      selectedAgent.bonusAmount = newBonusValue;
+    }
+    
+    const { total } = calculateTotalProvision(selectedAgent);
+    setBatchAmount(total.toFixed(2));
+    
+    console.log("BONUS DEBUG - Endret:", {
+      agentName: selectedAgent?.name,
+      newBonusValue: newBonusValue,
+      agentBonus: selectedAgent?.bonus
+    });
+  };
+  
+  const handleFivePercentChange = (event) => {
+    const newValue = event.target.checked;
+    setApplyFivePercent(newValue);
+    
+    if (selectedAgent) {
+      selectedAgent.applyFivePercent = newValue;
+    }
+    
+    const { total } = calculateTotalProvision(selectedAgent);
+    setBatchAmount(total.toFixed(2));
+    
+    console.log("5% TREKK DEBUG - Endret:", {
+      agentName: selectedAgent?.name,
+      newValue,
+      agentApplyFivePercent: selectedAgent?.applyFivePercent
+    });
+  };
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -272,6 +332,44 @@ const ApprovalDialog = ({
             </Typography>
           </Grid>
 
+          {/* Legg til kontroll for å slå av/på 5% trekk */}
+          <Box mt={2} mb={1}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={applyFivePercent}
+                  onChange={handleFivePercentChange}
+                  color="primary"
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  Aktiver 5% trekk {selectedAgent.monthsEmployed !== null && 
+                    `(${selectedAgent.monthsEmployed} måneder ansatt${selectedAgent.monthsEmployed < 9 ? 
+                      ', anbefalt' : ', ikke nødvendig'})`}
+                </Typography>
+              }
+            />
+          </Box>
+
+          {/* Bonus input felt */}
+          <Box mt={2} mb={1}>
+            <TextField
+              label="Bonus"
+              type="number"
+              fullWidth
+              variant="outlined"
+              value={bonus}
+              onChange={handleBonusChange}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">kr</InputAdornment>
+                ),
+              }}
+              helperText="Legg til eventuell bonus for perioden"
+            />
+          </Box>
+
           <Grid item xs={12}>
             <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Beregningsdetaljer</Typography>
             <Box sx={{ px: 2, py: 1, bgcolor: theme.palette.grey[50], borderRadius: 1 }}>
@@ -303,14 +401,14 @@ const ApprovalDialog = ({
                   </Typography>
                 </Grid>
 
-                {details.bonusAmount > 0 && (
+                {parseFloat(bonus) > 0 && (
                   <>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="success.main">Bonus:</Typography>
                     </Grid>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="success.main" align="right">
-                        +{details.bonusAmount.toLocaleString('nb-NO')} kr
+                        +{parseFloat(bonus).toLocaleString('nb-NO')} kr
                       </Typography>
                     </Grid>
 
@@ -348,7 +446,7 @@ const ApprovalDialog = ({
                 </Grid>
 
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="error">Bytt trekk:</Typography>
+                  <Typography variant="body2" color="error">Bytt trekk</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="error" align="right">
@@ -357,7 +455,7 @@ const ApprovalDialog = ({
                 </Grid>
 
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="error">Andre trekk:</Typography>
+                  <Typography variant="body2" color="error">Andre trekk</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="error" align="right">
@@ -365,26 +463,15 @@ const ApprovalDialog = ({
                   </Typography>
                 </Grid>
 
-                {details.fixedSalary > 0 && (
-                  <>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="success.main">Fastlønn:</Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="success.main" align="right">
-                        +{details.fixedSalary.toLocaleString('nb-NO')} kr
-                      </Typography>
-                    </Grid>
-                  </>
-                )}
-
-                <Grid item xs={12}><Divider sx={{ my: 1 }} /></Grid>
+                <Grid item xs={12}>
+                  <Divider sx={{ my: 1 }} />
+                </Grid>
 
                 <Grid item xs={6}>
-                  <Typography variant="subtitle1" fontWeight="bold">Total utbetaling:</Typography>
+                  <Typography variant="body1" fontWeight="bold">Total utbetaling:</Typography>
                 </Grid>
                 <Grid item xs={6}>
-                  <Typography variant="subtitle1" fontWeight="bold" align="right" color={theme.palette.success.main}>
+                  <Typography variant="body1" fontWeight="bold" color="success.main" align="right">
                     {total.toLocaleString('nb-NO')} kr
                   </Typography>
                 </Grid>
@@ -489,13 +576,13 @@ const ApprovalDialog = ({
           Avbryt
         </Button>
         <Button
-          onClick={handleBatchApprove}
+          onClick={() => handleBatchApprove(selectedAgent, parseFloat(batchAmount), batchComment)}
           variant="contained"
           color="success"
-          startIcon={<CheckCircle />}
+          startIcon={batchApprovalLoading ? <CircularProgress size={24} /> : <CheckCircle />}
           disabled={batchApprovalLoading || !batchAmount || parseFloat(batchAmount) <= 0}
         >
-          {batchApprovalLoading ? <CircularProgress size={24} /> : 'Godkjenn Provisjon'}
+          {batchApprovalLoading ? 'Godkjenn Provisjon' : 'Godkjenn'}
         </Button>
       </DialogActions>
     </Dialog>
