@@ -43,6 +43,7 @@ const ApprovalDialog = ({
   fetchApprovals,
 }) => {
   const theme = useTheme();
+  // Legg til state for bonus og 5% trekk
   const [bonus, setBonus] = useState(0);
   const [applyFivePercent, setApplyFivePercent] = useState(false);
 
@@ -193,9 +194,13 @@ const ApprovalDialog = ({
   // Initialiser bonusverdi og 5% trekk-status når dialogen åpnes
   useEffect(() => {
     if (open && selectedAgent) {
+      // Hent bonus-verdi fra agent hvis tilgjengelig
       setBonus(selectedAgent.bonus || selectedAgent.bonusAmount || 0);
+      
+      // Hent 5% trekk-status fra agent
       setApplyFivePercent(selectedAgent.applyFivePercent || false);
       
+      // Viktig: Oppdater agent-objektet med bonusverdien
       if (selectedAgent) {
         selectedAgent.bonus = parseFloat(selectedAgent.bonus || selectedAgent.bonusAmount || 0);
       }
@@ -208,13 +213,13 @@ const ApprovalDialog = ({
     }
   }, [open, selectedAgent]);
 
-  // Når dialogen åpnes, initialiser batchAmount
+  // Når dialogen åpnes, initialiser batchAmount til den beregnede totalen
   useEffect(() => {
     if (open && selectedAgent) {
       const { total } = calculateTotalProvision(selectedAgent);
       setBatchAmount(total.toFixed(2));
     }
-  }, [open, selectedAgent, setBatchAmount, bonus, applyFivePercent]);
+  }, [open, selectedAgent, setBatchAmount, bonus, applyFivePercent]); // Legg til avhengigheter
 
   if (!selectedAgent) {
     return null;
@@ -222,15 +227,18 @@ const ApprovalDialog = ({
 
   const { total, details } = calculateTotalProvision(selectedAgent);
 
+  // Funksjon for å oppdatere agent-objektet når bonus endres
   const handleBonusChange = (e) => {
     const newBonusValue = e.target.value ? parseFloat(e.target.value) : 0;
     setBonus(newBonusValue);
     
+    // VIKTIG: Oppdater agent-objektet direkte
     if (selectedAgent) {
       selectedAgent.bonus = newBonusValue;
       selectedAgent.bonusAmount = newBonusValue;
     }
     
+    // Oppdatert batch amount basert på ny beregning med bonus
     const { total } = calculateTotalProvision(selectedAgent);
     setBatchAmount(total.toFixed(2));
     
@@ -241,14 +249,17 @@ const ApprovalDialog = ({
     });
   };
   
+  // Funksjon for å håndtere endringer i 5% trekk-status
   const handleFivePercentChange = (event) => {
     const newValue = event.target.checked;
     setApplyFivePercent(newValue);
     
+    // VIKTIG: Oppdater agent-objektet direkte
     if (selectedAgent) {
       selectedAgent.applyFivePercent = newValue;
     }
     
+    // Oppdater batch amount basert på ny beregning med endret 5% trekk-status
     const { total } = calculateTotalProvision(selectedAgent);
     setBatchAmount(total.toFixed(2));
     
@@ -446,7 +457,7 @@ const ApprovalDialog = ({
                 </Grid>
 
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="error">Bytt trekk</Typography>
+                  <Typography variant="body2" color="error">Bytt trekk:</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="error" align="right">
@@ -455,7 +466,7 @@ const ApprovalDialog = ({
                 </Grid>
 
                 <Grid item xs={6}>
-                  <Typography variant="body2" color="error">Andre trekk</Typography>
+                  <Typography variant="body2" color="error">Andre trekk:</Typography>
                 </Grid>
                 <Grid item xs={6}>
                   <Typography variant="body2" color="error" align="right">

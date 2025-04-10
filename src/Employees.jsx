@@ -87,6 +87,9 @@ function Employees() {
   const [success, setSuccess] = useState(null);
   const [salaryModels, setSalaryModels] = useState([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [newEmployee, setNewEmployee] = useState({
     name: '',
@@ -99,6 +102,26 @@ function Employees() {
     new_agent_company: '',
     hire_date: (format ? format(new Date(), 'yyyy-MM-dd') : formatDate(new Date())),
     apply_five_percent_deduction: true,
+    
+    // Nye felt
+    mentor: '',  // Fadder/Ansvarlig rådgiver
+    signature: '',  // Signatur
+    status: 'Ny',  // Status (f.eks. Ny, Aktiv)
+    personal_id: '',  // Personnummer
+    end_date: '',  // Sluttdato
+    work_phone: '',  // Jobbtelefonnummer
+    private_phone: '',  // Privat telefonnummer
+    higher_education: false,  // Allmennstudiekompetanse eller høyere
+    business_insurance: false,  // Næringsforsikring
+    f2100_access: '',  // Tilgangsnivå i F2100
+    access_package: '',  // Bestilt tilgangspakke
+    tff: false,  // TFF
+    property_register: false,  // Løsøreregister
+    cv_reference: false,  // CV/referat/innstilling
+    population_register: false,  // Folkeregisteret
+    police_certificate: false,  // Politiattest
+    basic_training: false,  // Gjennomført grunnopplæring
+    gos_ais: false  // GOS/AIS
   });
   const [editMode, setEditMode] = useState(false);
   const [userRole, setUserRole] = useState('user');
@@ -235,6 +258,26 @@ function Employees() {
         new_agent_company: '',
         hire_date: employee.hire_date || (format ? format(new Date(), 'yyyy-MM-dd') : formatDate(new Date())),
         apply_five_percent_deduction: employee.apply_five_percent_deduction ?? true,
+        
+        // Nye felt
+        mentor: employee.mentor || '',
+        signature: employee.signature || '',
+        status: employee.status || 'Ny',
+        personal_id: employee.personal_id || '',
+        end_date: employee.end_date || '',
+        work_phone: employee.work_phone || '',
+        private_phone: employee.private_phone || '',
+        higher_education: employee.higher_education ?? false,
+        business_insurance: employee.business_insurance ?? false,
+        f2100_access: employee.f2100_access || '',
+        access_package: employee.access_package || '',
+        tff: employee.tff ?? false,
+        property_register: employee.property_register ?? false,
+        cv_reference: employee.cv_reference ?? false,
+        population_register: employee.population_register ?? false,
+        police_certificate: employee.police_certificate ?? false,
+        basic_training: employee.basic_training ?? false,
+        gos_ais: employee.gos_ais ?? false
       });
       setEditMode(true);
     } else {
@@ -249,6 +292,26 @@ function Employees() {
         new_agent_company: '',
         hire_date: (format ? format(new Date(), 'yyyy-MM-dd') : formatDate(new Date())),
         apply_five_percent_deduction: true,
+        
+        // Nye felt
+        mentor: '',
+        signature: '',
+        status: 'Ny',
+        personal_id: '',
+        end_date: '',
+        work_phone: '',
+        private_phone: '',
+        higher_education: false,
+        business_insurance: false,
+        f2100_access: '',
+        access_package: '',
+        tff: false,
+        property_register: false,
+        cv_reference: false,
+        population_register: false,
+        police_certificate: false,
+        basic_training: false,
+        gos_ais: false
       });
       setEditMode(false);
     }
@@ -320,6 +383,7 @@ function Employees() {
       // Hvis lønnstrinn ikke er valgt, sett det til 1
       const salary_model_id = newEmployee.salary_model_id || '1';
 
+      // Håndter tomme datofelt - fjern dem fra objektet hvis de er tomme
       const employeeData = {
         ...newEmployee,
         salary_model_id,
@@ -330,6 +394,15 @@ function Employees() {
       
       // Remove any temporary fields
       delete employeeData.new_agent_company;
+      
+      // Håndter tomme datoer slik at de ikke sender ugyldig verdi til databasen
+      if (!employeeData.hire_date) {
+        employeeData.hire_date = null;
+      }
+      
+      if (!employeeData.end_date) {
+        employeeData.end_date = null;
+      }
       
       if (editMode) {
         const { id, ...updateData } = employeeData;
@@ -432,14 +505,112 @@ function Employees() {
       const imported = rows.map((row) => {
         const emp = {};
         headers.forEach((header, index) => {
-          emp[header] = row[index];
+          // Mapper kolonnehoder til riktige feltnavn i databasen
+          const value = row[index];
+          
+          switch(header.toLowerCase()) {
+            case 'navn':
+              emp.name = value;
+              break;
+            case 'stilling':
+            case 'stilling/funksjon':
+              emp.position = value !== undefined ? value : null;
+              break;
+            case 'avdeling':
+              emp.agent_company = value !== undefined ? value : null;
+              break;
+            case 'fadder':
+            case 'ansvarlig rådgiver':
+            case 'fadder/ansvarlig rådgiver':
+              emp.mentor = value !== undefined ? value : null;
+              break;
+            case 'signatur':
+              emp.signature = value !== undefined ? value : null;
+              break;
+            case 'status':
+              emp.status = value !== undefined ? value : null;
+              break;
+            case 'personnummer':
+              emp.personal_id = value !== undefined ? value : null;
+              break;
+            case 'sluttdato':
+            case 'slutt dato':
+              emp.end_date = value !== undefined ? value : null;
+              break;
+            case 'startdato':
+            case 'start dato':
+              emp.hire_date = value !== undefined ? value : null;
+              break;
+            case 'telefon':
+            case 'jobbtelefon':
+            case 'jobb telefonnummer':
+            case 'jobb telefon':
+              emp.work_phone = value !== undefined ? value : null;
+              break;
+            case 'privattelefon':
+            case 'privat telefonnummer':
+            case 'privat telefon':
+              emp.private_phone = value !== undefined ? value : null;
+              break;
+            case 'allmennstudiekompetanse':
+            case 'allmennstudiekompetanse eller høyere':
+              emp.higher_education = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'næringsforsikring':
+              emp.business_insurance = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'tilgangsnivå i f2100':
+            case 'f2100':
+              emp.f2100_access = value !== undefined ? value : null;
+              break;
+            case 'bestilt tilgangspakke':
+            case 'tilgangspakke':
+              emp.access_package = value !== undefined ? value : null;
+              break;
+            case 'tff':
+              emp.tff = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'løsøreregister':
+              emp.property_register = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'cv/referat/innstilling':
+            case 'cv':
+              emp.cv_reference = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'folkeregisteret':
+              emp.population_register = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'politiattest':
+              emp.police_certificate = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'gjennomført grunnopplæring':
+            case 'grunnopplæring':
+              emp.basic_training = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'gos/ais':
+            case 'gos':
+            case 'ais':
+              emp.gos_ais = value === 'Ja' || value === 'ja' || value === 'JA' || value === true;
+              break;
+            case 'agent id':
+            case 'id':
+              emp.agent_id = value !== undefined ? value : null;
+              break;
+            case 'email':
+            case 'e-post':
+              emp.email = value !== undefined ? value : null;
+              break;
+            default:
+              // For andre kolonner, bruk header som feltnavn
+              emp[header] = value !== undefined ? value : null;
+          }
         });
         return emp;
       });
       
-      // Filtrer ut rader som mangler name eller agent_id
+      // Filtrer ut rader som mangler name
       const validEmployees = imported.filter(
-        (emp) => emp.name && emp.agent_id
+        (emp) => emp.name
       );
       
       // Fjern duplikater basert på name (siste rad "vinner")
@@ -455,20 +626,108 @@ function Employees() {
         });
       }
       
-      const { data: upsertData, error } = await supabase
-        .from("employees")
-        .upsert(uniqueByName, { onConflict: "name" })
-        .select();
+      // Konverter dato-verdier til riktig format
+      uniqueByName.forEach(emp => {
+        // Sett standard for rolle-felt
+        emp.role = emp.role || 'user';
         
-      if (error) {
-        console.error("Import feilet:", error);
-        setUploadError("Import feilet: " + error.message);
-      } else {
-        setEmployees([...employees.filter(e => !upsertData.some(u => u.id === e.id)), ...upsertData]);
+        // Håndter tomme datoer
+        if (emp.hire_date === null || emp.hire_date === '') {
+          emp.hire_date = null;
+        } else if (emp.hire_date && typeof emp.hire_date === 'string') {
+          // Håndterer ulike datoformater
+          try {
+            const parsedDate = new Date(emp.hire_date);
+            if (!isNaN(parsedDate)) {
+              emp.hire_date = format 
+                ? format(parsedDate, 'yyyy-MM-dd') 
+                : formatDate(parsedDate);
+            }
+          } catch (err) {
+            console.warn('Kunne ikke parse dato: ', emp.hire_date);
+            emp.hire_date = null;
+          }
+        }
+        
+        if (emp.end_date === null || emp.end_date === '') {
+          emp.end_date = null;
+        } else if (emp.end_date && typeof emp.end_date === 'string') {
+          try {
+            const parsedDate = new Date(emp.end_date);
+            if (!isNaN(parsedDate)) {
+              emp.end_date = format 
+                ? format(parsedDate, 'yyyy-MM-dd') 
+                : formatDate(parsedDate);
+            }
+          } catch (err) {
+            console.warn('Kunne ikke parse sluttdato: ', emp.end_date);
+            emp.end_date = null;
+          }
+        }
+      });
+      
+      console.log('Data som skal importeres:', uniqueByName);
+      
+      // For hver ansatt, hent først eksisterende data og oppdater kun angitte felter
+      const updatedEmployees = [];
+      for (const emp of uniqueByName) {
+        // Sjekk om ansatt finnes fra før
+        const { data: existingEmployee, error: fetchError } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('name', emp.name)
+          .maybeSingle();
+          
+        if (fetchError) {
+          console.error("Feil ved henting av eksisterende ansatt:", fetchError);
+          continue;
+        }
+        
+        if (existingEmployee) {
+          // Ansatt finnes, oppdater med ID
+          const { data: updatedData, error: updateError } = await supabase
+            .from('employees')
+            .update(emp)
+            .eq('id', existingEmployee.id)
+            .select();
+          
+          if (updateError) {
+            console.error("Feil ved oppdatering av ansatt:", updateError);
+          } else if (updatedData) {
+            updatedEmployees.push(updatedData[0]);
+          }
+        } else {
+          // Ansatt finnes ikke, opprett ny
+          const { data: newData, error: insertError } = await supabase
+            .from('employees')
+            .insert([emp])
+            .select();
+          
+          if (insertError) {
+            console.error("Feil ved oppretting av ansatt:", insertError);
+          } else if (newData) {
+            updatedEmployees.push(newData[0]);
+          }
+        }
+      }
+        
+      if (updatedEmployees.length > 0) {
+        // Oppdaterer employees-staten med de nye oppdaterte ansatte
+        setEmployees(prev => {
+          // Fjern de som ble oppdatert fra listen
+          const filteredEmployees = prev.filter(emp => 
+            !updatedEmployees.some(updated => updated.id === emp.id)
+          );
+          // Legg til de oppdaterte ansatte
+          return [...filteredEmployees, ...updatedEmployees];
+        });
+        
         setUploadSuccess(true);
-        setImportMessage(`Import vellykket: ${upsertData.length} oppføringer behandlet.`);
+        setImportMessage(`Import vellykket: ${updatedEmployees.length} oppføringer behandlet.`);
         setFile(null);
         setFileName("");
+      } else {
+        setUploadError("Ingen ansatte ble importert.");
       }
     } catch (err) {
       console.error("Feil under import:", err);
@@ -505,7 +764,17 @@ function Employees() {
     const matchesSearch = searchTerm === "" || searchFields.includes(searchTerm.toLowerCase());
     
     return matchesDepartment && matchesSearch;
-  });
+  }).sort((a, b) => a.name.localeCompare(b.name, 'nb'));
+
+  const openEmployeeDetails = (employee) => {
+    setSelectedEmployee(employee);
+    setDetailDialogOpen(true);
+  };
+
+  const closeEmployeeDetails = () => {
+    setDetailDialogOpen(false);
+    setSelectedEmployee(null);
+  };
 
   return (
     <Box sx={{ 
@@ -517,261 +786,8 @@ function Employees() {
       <NavigationMenu />
       
       <MuiGrid container spacing={3}>
-        {/* File Import Section */}
-        <MuiGrid item xs={12}>
-          <Paper elevation={2} sx={{ p: 3, borderRadius: 2, mb: 3 }}>
-            <Typography variant="h6" fontWeight="bold" gutterBottom sx={{ mb: 3, display: 'flex', alignItems: 'center' }}>
-              <UploadFile sx={{ mr: 1 }} color="primary" />
-              Importer ansatte fra fil
-            </Typography>
-            
-            {uploadSuccess && !file && (
-              <Alert severity="success" sx={{ mb: 3 }}>
-                <AlertTitle>Suksess</AlertTitle>
-                {importMessage || success || "Data ble lastet opp og behandlet"}
-              </Alert>
-            )}
-            
-            {uploadError && (
-              <Alert severity="error" sx={{ mb: 3 }}>
-                <AlertTitle>Feil</AlertTitle>
-                {uploadError}
-              </Alert>
-            )}
-            
-            <MuiGrid container spacing={2} alignItems="center">
-              <MuiGrid item xs={12} md={4}>
-                <Button
-                  variant="outlined"
-                  component="label"
-                  startIcon={<UploadFile />}
-                  fullWidth
-                  sx={{ py: 1.5 }}
-                  disabled={loading}
-                >
-                  Velg Excel-fil
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls,.csv"
-                    hidden
-                    onChange={handleFileUpload}
-                  />
-                </Button>
-              </MuiGrid>
-              
-              <MuiGrid item xs={12} md={4}>
-                <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-                  {fileName ? (
-                    <Chip
-                      icon={<Business />}
-                      label={fileName}
-                      variant="outlined"
-                      onDelete={cancelFileUpload}
-                      sx={{ maxWidth: '100%', overflow: 'hidden' }}
-                    />
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      Ingen fil valgt
-                    </Typography>
-                  )}
-                </Box>
-              </MuiGrid>
-              
-              <MuiGrid item xs={12} md={4}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<CloudUpload />}
-                  fullWidth
-                  sx={{ py: 1.5 }}
-                  onClick={handleImport}
-                  disabled={!file || loading}
-                >
-                  {loading ? "Importerer..." : "Importer"}
-                </Button>
-              </MuiGrid>
-            </MuiGrid>
-          </Paper>
-        </MuiGrid>
-        
-        {/* Add New Employee Form */}
-        <MuiGrid item xs={12} md={4}>
-          <Paper elevation={2} sx={{ p: 3, borderRadius: 2, height: '100%' }}>
-            <Typography variant="h6" fontWeight="bold" gutterBottom sx={{ mb: 3, display: 'flex', alignItems: 'center' }}>
-              <Person sx={{ mr: 1 }} color="primary" />
-              Legg til ny ansatt
-            </Typography>
-            
-            <MuiGrid container spacing={2}>
-              <MuiGrid item xs={12}>
-                <TextField
-                  label="Navn"
-                  name="name"
-                  value={newEmployee.name}
-                  onChange={handleInputChange}
-                  fullWidth
-                  required
-                  size="small"
-                />
-              </MuiGrid>
-              
-              <MuiGrid item xs={12}>
-                <TextField
-                  label="Email"
-                  name="email"
-                  type="email"
-                  value={newEmployee.email}
-                  onChange={handleInputChange}
-                  fullWidth
-                  required
-                  size="small"
-                />
-              </MuiGrid>
-              
-              <MuiGrid item xs={12}>
-                <TextField
-                  label="Agent ID"
-                  name="agent_id"
-                  value={newEmployee.agent_id}
-                  onChange={handleInputChange}
-                  fullWidth
-                  required
-                  size="small"
-                />
-              </MuiGrid>
-              
-              <MuiGrid item xs={12}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>Kontor</InputLabel>
-                  <Select
-                    label="Kontor"
-                    name="agent_company"
-                    value={userRole === 'manager' ? userOffice : newEmployee.agent_company}
-                    onChange={handleInputChange}
-                    required
-                    disabled={userRole === 'manager'}
-                  >
-                    {departments.length > 0 ? (
-                      departments.map(dept => (
-                        <MenuItem key={dept} value={dept}>
-                          {dept}
-                        </MenuItem>
-                      ))
-                    ) : (
-                      <MenuItem value="" disabled>
-                        Ingen kontorer funnet
-                      </MenuItem>
-                    )}
-                    {userRole === 'admin' && (
-                      <MenuItem value="new_department">
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Add fontSize="small" sx={{ mr: 1 }} />
-                          Angi nytt kontor
-                        </Box>
-                      </MenuItem>
-                    )}
-                  </Select>
-                </FormControl>
-                {userRole === 'admin' && newEmployee.agent_company === 'new_department' && (
-                  <TextField
-                    fullWidth
-                    label="Nytt kontor"
-                    value={newEmployee.new_agent_company || ''}
-                    onChange={(e) => setNewEmployee({
-                      ...newEmployee,
-                      new_agent_company: e.target.value
-                    })}
-                    size="small"
-                    margin="dense"
-                    required
-                  />
-                )}
-              </MuiGrid>
-              
-              <MuiGrid item xs={12}>
-                <TextField
-                  label="Stilling"
-                  name="position"
-                  value={newEmployee.position}
-                  onChange={handleInputChange}
-                  fullWidth
-                  size="small"
-                />
-              </MuiGrid>
-              
-              <MuiGrid item xs={12}>
-                <TextField
-                  select
-                  label="Velg lønnstrinn"
-                  name="salary_model_id"
-                  value={newEmployee.salary_model_id}
-                  onChange={handleInputChange}
-                  fullWidth
-                  size="small"
-                >
-                  <MenuItem value="">Velg lønnstrinn</MenuItem>
-                  {salaryModels.map((model) => (
-                    <MenuItem key={model.id} value={model.id}>
-                      {model.name}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </MuiGrid>
-              
-              <MuiGrid item xs={12}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>5% trekk</InputLabel>
-                  <Select
-                    name="apply_five_percent_deduction"
-                    value={newEmployee.apply_five_percent_deduction ? "true" : "false"}
-                    onChange={(e) => setNewEmployee({
-                      ...newEmployee,
-                      apply_five_percent_deduction: e.target.value === "true"
-                    })}
-                  >
-                    <MenuItem value="true">Ja</MenuItem>
-                    <MenuItem value="false">Nei</MenuItem>
-                  </Select>
-                </FormControl>
-              </MuiGrid>
-              
-              {/* Only show role selector for admins */}
-              {userRole === 'admin' && (
-                <MuiGrid item xs={12}>
-                  <TextField
-                    select
-                    label="Rolle"
-                    name="role"
-                    value={newEmployee.role}
-                    onChange={handleInputChange}
-                    fullWidth
-                    size="small"
-                  >
-                    <MenuItem value="user">Bruker</MenuItem>
-                    <MenuItem value="manager">Kontorleder</MenuItem>
-                    <MenuItem value="admin">Administrator</MenuItem>
-                  </TextField>
-                </MuiGrid>
-              )}
-              
-              <MuiGrid item xs={12}>
-                <Button
-                  variant="contained"
-                  startIcon={<Add />}
-                  fullWidth
-                  onClick={handleSaveEmployee}
-                  disabled={loading}
-                  sx={{ mt: 1 }}
-                >
-                  {loading ? "Lagrer..." : "Legg til ansatt"}
-                </Button>
-              </MuiGrid>
-            </MuiGrid>
-          </Paper>
-        </MuiGrid>
-        
         {/* Employees List */}
-        <MuiGrid item xs={12} md={8}>
+        <MuiGrid item xs={12}>
           <Paper elevation={2} sx={{ p: 3, borderRadius: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <Typography variant="h6" fontWeight="bold" sx={{ display: 'flex', alignItems: 'center' }}>
@@ -788,6 +804,26 @@ function Employees() {
               </Typography>
               
               <Box>
+                <Button 
+                  variant="outlined" 
+                  startIcon={<Add />} 
+                  onClick={() => handleOpenDialog(null)}
+                  size="small"
+                  sx={{ mr: 1 }}
+                >
+                  Legg til ansatt
+                </Button>
+
+                <Button 
+                  variant="outlined" 
+                  startIcon={<UploadFile />} 
+                  onClick={() => setImportDialogOpen(true)}
+                  size="small"
+                  sx={{ mr: 1 }}
+                >
+                  Importer fra fil
+                </Button>
+
                 <Tooltip title="Oppdater data">
                   <IconButton onClick={fetchEmployees} color="primary" size="small">
                     <Refresh />
@@ -848,45 +884,40 @@ function Employees() {
                   <TableHead>
                     <TableRow>
                       <TableCell>Navn</TableCell>
-                      <TableCell>Email</TableCell>
-                      <TableCell>Agent ID</TableCell>
                       <TableCell>Avdeling</TableCell>
-                      <TableCell>Stilling</TableCell>
+                      <TableCell>Telefon</TableCell>
                       <TableCell>Lønnstrinn</TableCell>
-                      <TableCell>Ansettelsesdato</TableCell>
-                      <TableCell>Ansettelsestid</TableCell>
-                      <TableCell>5% trekk</TableCell>
-                      {userRole === 'admin' && <TableCell>Rolle</TableCell>}
                       <TableCell>Handlinger</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {filteredEmployees.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={userRole === 'admin' ? 9 : 8} align="center">
+                        <TableCell colSpan={5} align="center">
                           Ingen ansatte funnet
                         </TableCell>
                       </TableRow>
                     ) : (
                       filteredEmployees.map((emp) => {
                         const salaryModel = salaryModels.find(model => model.id === emp.salary_model_id);
-                        const hireDate = emp.hire_date ? new Date(emp.hire_date) : null;
-                        const monthsEmployed = hireDate ? (differenceInMonths ? differenceInMonths(new Date(), hireDate) : calculateMonthsDiff(hireDate)) : null;
                         
                         return (
-                          <TableRow key={emp.id} hover>
+                          <TableRow 
+                            key={emp.id} 
+                            hover
+                            onClick={() => openEmployeeDetails(emp)} 
+                            sx={{ cursor: 'pointer' }}
+                          >
                             <TableCell>{emp.name}</TableCell>
-                            <TableCell>{emp.email}</TableCell>
-                            <TableCell>{emp.agent_id || "Ikke angitt"}</TableCell>
                             <TableCell>
                               <Chip 
-                                label={emp.agent_company || 'Not assigned'} 
+                                label={emp.agent_company || 'Ikke angitt'} 
                                 size="small"
                                 variant="outlined"
                                 color="primary"
                               />
                             </TableCell>
-                            <TableCell>{emp.position}</TableCell>
+                            <TableCell>{emp.work_phone || 'Ikke angitt'}</TableCell>
                             <TableCell>
                               {salaryModel ? (
                                 <Chip 
@@ -897,54 +928,25 @@ function Employees() {
                                 />
                               ) : "Ikke angitt"}
                             </TableCell>
-                            <TableCell>{emp.hire_date || "Ikke angitt"}</TableCell>
-                            <TableCell>
-                              {monthsEmployed !== null ? `${monthsEmployed} måneder` : 'Ukjent'}
-                            </TableCell>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                <Chip
-                                  label={emp.apply_five_percent_deduction ? 'Ja' : 'Nei'}
-                                  color={emp.apply_five_percent_deduction ? 'primary' : 'default'}
-                                  size="small"
-                                  sx={{ mr: 1 }}
-                                />
-                                <IconButton 
-                                  size="small"
-                                  onClick={() => toggleDeduction(emp.id, emp.apply_five_percent_deduction)}
-                                  color={emp.apply_five_percent_deduction ? 'primary' : 'default'}
-                                >
-                                  {emp.apply_five_percent_deduction ? <ToggleOn /> : <ToggleOff />}
-                                </IconButton>
-                              </Box>
-                            </TableCell>
-                            {userRole === 'admin' && (
-                              <TableCell>
-                                <Chip 
-                                  label={emp.role || 'user'} 
-                                  size="small" 
-                                  color={
-                                    emp.role === 'admin' ? 'error' :
-                                    emp.role === 'manager' ? 'warning' :
-                                    'default'
-                                  }
-                                  variant="outlined"
-                                />
-                              </TableCell>
-                            )}
                             <TableCell>
                               <Stack direction="row" spacing={1}>
                                 <IconButton 
                                   size="small" 
                                   color="primary" 
-                                  onClick={() => handleOpenDialog(emp)}
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // Hindrer at raden trigges
+                                    handleOpenDialog(emp);
+                                  }}
                                 >
                                   <Edit fontSize="small" />
                                 </IconButton>
                                 <IconButton 
                                   size="small" 
                                   color="error" 
-                                  onClick={() => handleDeleteEmployee(emp.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation(); // Hindrer at raden trigges
+                                    handleDeleteEmployee(emp.id);
+                                  }}
                                 >
                                   <Delete fontSize="small" />
                                 </IconButton>
@@ -962,6 +964,307 @@ function Employees() {
         </MuiGrid>
       </MuiGrid>
       
+      {/* Employee Details Dialog */}
+      <Dialog
+        open={detailDialogOpen}
+        onClose={closeEmployeeDetails}
+        maxWidth="md"
+        fullWidth
+      >
+        {selectedEmployee && (
+          <>
+            <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <Person sx={{ mr: 1 }} color="primary" />
+                <Typography variant="h6">{selectedEmployee.name}</Typography>
+              </Box>
+              <Box>
+                <IconButton size="small" color="primary" onClick={() => {
+                  closeEmployeeDetails();
+                  handleOpenDialog(selectedEmployee);
+                }}>
+                  <Edit />
+                </IconButton>
+                <IconButton
+                  aria-label="close"
+                  onClick={closeEmployeeDetails}
+                  sx={{ ml: 1 }}
+                >
+                  <Close />
+                </IconButton>
+              </Box>
+            </DialogTitle>
+            <DialogContent dividers>
+              <MuiGrid container spacing={3}>
+                {/* Basisinformasjon */}
+                <MuiGrid item xs={12}>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Basisinformasjon
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <MuiGrid container spacing={2}>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Avdeling</Typography>
+                        <Typography variant="body1">{selectedEmployee.agent_company || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Agent ID</Typography>
+                        <Typography variant="body1">{selectedEmployee.agent_id || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Stilling</Typography>
+                        <Typography variant="body1">{selectedEmployee.position || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">E-post</Typography>
+                        <Typography variant="body1">{selectedEmployee.email || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Telefon</Typography>
+                        <Typography variant="body1">{selectedEmployee.work_phone || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Lønnstrinn</Typography>
+                        <Typography variant="body1">
+                          {salaryModels.find(model => model.id === selectedEmployee.salary_model_id)?.name || 'Ikke angitt'}
+                        </Typography>
+                      </MuiGrid>
+                    </MuiGrid>
+                  </Paper>
+                </MuiGrid>
+
+                {/* Ansettelsesinfo */}
+                <MuiGrid item xs={12}>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Ansettelsesinfo
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <MuiGrid container spacing={2}>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Startdato</Typography>
+                        <Typography variant="body1">{selectedEmployee.hire_date || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Sluttdato</Typography>
+                        <Typography variant="body1">{selectedEmployee.end_date || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Status</Typography>
+                        <Typography variant="body1">{selectedEmployee.status || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Personnummer</Typography>
+                        <Typography variant="body1">{selectedEmployee.personal_id || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Fadder/Ansvarlig</Typography>
+                        <Typography variant="body1">{selectedEmployee.mentor || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={4}>
+                        <Typography variant="body2" color="textSecondary">Privat telefon</Typography>
+                        <Typography variant="body1">{selectedEmployee.private_phone || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                    </MuiGrid>
+                  </Paper>
+                </MuiGrid>
+
+                {/* Tilganger og kvalifikasjoner */}
+                <MuiGrid item xs={12}>
+                  <Typography variant="subtitle1" fontWeight="bold" gutterBottom>
+                    Tilganger og kvalifikasjoner
+                  </Typography>
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <MuiGrid container spacing={2}>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Signatur</Typography>
+                        <Typography variant="body1">{selectedEmployee.signature || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Tilgangsnivå i F2100</Typography>
+                        <Typography variant="body1">{selectedEmployee.f2100_access || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Bestilt tilgangspakke</Typography>
+                        <Typography variant="body1">{selectedEmployee.access_package || 'Ikke angitt'}</Typography>
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">TFF</Typography>
+                        <Chip 
+                          label={selectedEmployee.tff ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.tff ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Allmennstudiekompetanse</Typography>
+                        <Chip 
+                          label={selectedEmployee.higher_education ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.higher_education ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Næringsforsikring</Typography>
+                        <Chip 
+                          label={selectedEmployee.business_insurance ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.business_insurance ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Løsøreregister</Typography>
+                        <Chip 
+                          label={selectedEmployee.property_register ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.property_register ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">CV/referat/innstilling</Typography>
+                        <Chip 
+                          label={selectedEmployee.cv_reference ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.cv_reference ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Folkeregisteret</Typography>
+                        <Chip 
+                          label={selectedEmployee.population_register ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.population_register ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Politiattest</Typography>
+                        <Chip 
+                          label={selectedEmployee.police_certificate ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.police_certificate ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">Grunnopplæring</Typography>
+                        <Chip 
+                          label={selectedEmployee.basic_training ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.basic_training ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                      <MuiGrid item xs={12} sm={6} md={3}>
+                        <Typography variant="body2" color="textSecondary">GOS/AIS</Typography>
+                        <Chip 
+                          label={selectedEmployee.gos_ais ? 'Ja' : 'Nei'} 
+                          size="small" 
+                          color={selectedEmployee.gos_ais ? 'success' : 'default'}
+                        />
+                      </MuiGrid>
+                    </MuiGrid>
+                  </Paper>
+                </MuiGrid>
+              </MuiGrid>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={closeEmployeeDetails} color="primary">
+                Lukk
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
+      
+      {/* Import Dialog */}
+      <Dialog open={importDialogOpen} onClose={() => setImportDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center' }}>
+          <UploadFile sx={{ mr: 1 }} color="primary" fontSize="small" />
+          Importer ansatte fra fil
+          <IconButton
+            aria-label="close"
+            onClick={() => setImportDialogOpen(false)}
+            sx={{ position: 'absolute', right: 8, top: 8 }}
+          >
+            <Close />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {uploadSuccess && !file && (
+            <Alert severity="success" sx={{ mb: 3 }}>
+              <AlertTitle>Suksess</AlertTitle>
+              {importMessage || success || "Data ble lastet opp og behandlet"}
+            </Alert>
+          )}
+          
+          {uploadError && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              <AlertTitle>Feil</AlertTitle>
+              {uploadError}
+            </Alert>
+          )}
+          
+          <MuiGrid container spacing={2} alignItems="center">
+            <MuiGrid item xs={12} md={4}>
+              <Button
+                variant="outlined"
+                component="label"
+                startIcon={<UploadFile />}
+                fullWidth
+                sx={{ py: 1.5 }}
+                disabled={loading}
+              >
+                Velg Excel-fil
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  hidden
+                  onChange={handleFileUpload}
+                />
+              </Button>
+            </MuiGrid>
+            
+            <MuiGrid item xs={12} md={4}>
+              <Box sx={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                {fileName ? (
+                  <Chip
+                    icon={<Business />}
+                    label={fileName}
+                    variant="outlined"
+                    onDelete={cancelFileUpload}
+                    sx={{ maxWidth: '100%', overflow: 'hidden' }}
+                  />
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Ingen fil valgt
+                  </Typography>
+                )}
+              </Box>
+            </MuiGrid>
+            
+            <MuiGrid item xs={12} md={4}>
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<CloudUpload />}
+                fullWidth
+                sx={{ py: 1.5 }}
+                onClick={handleImport}
+                disabled={!file || loading}
+              >
+                {loading ? "Importerer..." : "Importer"}
+              </Button>
+            </MuiGrid>
+          </MuiGrid>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setImportDialogOpen(false)}
+            startIcon={<Cancel />}
+            size="small"
+          >
+            Lukk
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
       {/* Edit Employee Dialog */}
       <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center' }}>
@@ -978,6 +1281,11 @@ function Employees() {
         <form onSubmit={handleSaveEmployee}>
           <DialogContent dividers>
             <MuiGrid container spacing={2}>
+              {/* Basisinformasjon */}
+              <MuiGrid item xs={12}>
+                <Typography variant="subtitle1" gutterBottom>Basisinformasjon</Typography>
+              </MuiGrid>
+              
               <MuiGrid item xs={12}>
                 <TextField
                   fullWidth
@@ -1093,6 +1401,103 @@ function Employees() {
               </MuiGrid>
               
               <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Jobbtelefon"
+                  name="work_phone"
+                  value={newEmployee.work_phone}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Privat telefon"
+                  name="private_phone"
+                  value={newEmployee.private_phone}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              {/* Ansettelsesinfo */}
+              <MuiGrid item xs={12} sx={{ mt: 2 }}>
+                <Typography variant="subtitle1" gutterBottom>Ansettelsesinfo</Typography>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Personnummer"
+                  name="personal_id"
+                  value={newEmployee.personal_id}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Fadder/Ansvarlig"
+                  name="mentor"
+                  value={newEmployee.mentor}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Signatur"
+                  name="signature"
+                  value={newEmployee.signature}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Status"
+                  name="status"
+                  value={newEmployee.status}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Startdato"
+                  name="hire_date"
+                  type="date"
+                  value={newEmployee.hire_date}
+                  onChange={handleInputChange}
+                  size="small"
+                  InputLabelProps={{ shrink: true }}
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
+                <TextField
+                  fullWidth
+                  label="Sluttdato"
+                  name="end_date"
+                  type="date"
+                  value={newEmployee.end_date}
+                  onChange={handleInputChange}
+                  size="small"
+                  InputLabelProps={{ shrink: true }}
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6}>
                 <FormControl fullWidth size="small">
                   <InputLabel>5% trekk</InputLabel>
                   <Select
@@ -1101,6 +1506,186 @@ function Employees() {
                     onChange={(e) => setNewEmployee({
                       ...newEmployee,
                       apply_five_percent_deduction: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              {/* Tilganger og kvalifikasjoner */}
+              <MuiGrid item xs={12} sx={{ mt: 2 }}>
+                <Typography variant="subtitle1" gutterBottom>Tilganger og kvalifikasjoner</Typography>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Allmennstudiekompetanse</InputLabel>
+                  <Select
+                    name="higher_education"
+                    value={newEmployee.higher_education ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      higher_education: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Næringsforsikring</InputLabel>
+                  <Select
+                    name="business_insurance"
+                    value={newEmployee.business_insurance ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      business_insurance: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <TextField
+                  fullWidth
+                  label="Tilgang F2100"
+                  name="f2100_access"
+                  value={newEmployee.f2100_access}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <TextField
+                  fullWidth
+                  label="Tilgangspakke"
+                  name="access_package"
+                  value={newEmployee.access_package}
+                  onChange={handleInputChange}
+                  size="small"
+                />
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>TFF</InputLabel>
+                  <Select
+                    name="tff"
+                    value={newEmployee.tff ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      tff: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Løsøreregister</InputLabel>
+                  <Select
+                    name="property_register"
+                    value={newEmployee.property_register ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      property_register: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>CV/Referat</InputLabel>
+                  <Select
+                    name="cv_reference"
+                    value={newEmployee.cv_reference ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      cv_reference: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Folkeregisteret</InputLabel>
+                  <Select
+                    name="population_register"
+                    value={newEmployee.population_register ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      population_register: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Politiattest</InputLabel>
+                  <Select
+                    name="police_certificate"
+                    value={newEmployee.police_certificate ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      police_certificate: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Grunnopplæring</InputLabel>
+                  <Select
+                    name="basic_training"
+                    value={newEmployee.basic_training ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      basic_training: e.target.value === "true"
+                    })}
+                  >
+                    <MenuItem value="true">Ja</MenuItem>
+                    <MenuItem value="false">Nei</MenuItem>
+                  </Select>
+                </FormControl>
+              </MuiGrid>
+              
+              <MuiGrid item xs={12} sm={6} md={3}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>GOS/AIS</InputLabel>
+                  <Select
+                    name="gos_ais"
+                    value={newEmployee.gos_ais ? "true" : "false"}
+                    onChange={(e) => setNewEmployee({
+                      ...newEmployee,
+                      gos_ais: e.target.value === "true"
                     })}
                   >
                     <MenuItem value="true">Ja</MenuItem>
