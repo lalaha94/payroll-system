@@ -12,8 +12,8 @@ import { OfficeManagerDashboard } from './Manager';
 import './index.css';
 
 // Import SalesDataDashboard directly - handle it properly to avoid circular imports
-import AdminDashboard from './admin/SalesDataDashboard';
-import SalesDataDashboard from './admin/SalesDataDashboard'; // Ensure SalesDataDashboard is properly imported
+import AdminDashboard from './Admin/SalesDataDashboard';
+import SalesDataDashboard from './Admin/SalesDataDashboard'; // Ensure SalesDataDashboard is properly imported
 import AgentDashboard from './Agent/components/AgentDashboard'; // Import the AgentDashboard component
 import ProtectedRoute from './routes/ProtectedRoute'; // Import the external ProtectedRoute component
 import ErrorBoundary from './components/common/ErrorBoundary'; // Import the external ErrorBoundary
